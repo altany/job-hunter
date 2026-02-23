@@ -317,22 +317,25 @@ You should now see the job-hunter tools available in your Claude session — the
 
 ## Testing it works
 
-Try these in Claude Desktop:
+Try these in Claude Desktop after restarting:
 
-```
-"What tools do you have available?"
-```
-→ Should list all the job-hunter tools.
-
+**Test 1 — Sheets connection:**
 ```
 "Show me my job applications"
 ```
-→ Should return "No applications tracked yet" (or your existing pipeline if any).
+→ Should return "No applications tracked yet." If you get a permissions or config error, check your `spreadsheet_id` and that the sheet is shared with the service account.
 
+**Test 2 — CV loading:**
+```
+"Tailor my CV for a senior frontend role at a SaaS company"
+```
+→ Should produce a tailored CV using your actual experience. If it can't find your CV, check `cv_file_path` in `config.json`.
+
+**Test 3 — Full flow:**
 ```
 "Rate this job: [paste any job ad]"
 ```
-→ Should research the company and give you a scored breakdown.
+→ Should research the company and give you a scored breakdown against your preferences.
 
 ---
 
