@@ -1,0 +1,52 @@
+{
+  "cv_file_path": "/absolute/path/to/your/cv.pdf",
+
+  "cv_constants": {
+    "name": "Your Name",
+    "CONTACT_EMAIL": "you@example.com"
+  },
+
+  "google_sheets": {
+    "spreadsheet_id": "YOUR_GOOGLE_SHEET_ID_HERE",
+    "service_account_key_file": "/absolute/path/to/service-account-key.json"
+  },
+
+  "preferences": {
+    "work_style": {
+      "preferred": ["Remote", "Hybrid"],
+      "dealbreaker": ["Onsite-only if >2 days/week"]
+    },
+    "salary": {
+      "minimum": 60000,
+      "target": 80000,
+      "currency": "GBP",
+      "notes": "Open to equity in early-stage startups"
+    },
+    "industries": {
+      "preferred": ["Industry A", "Industry B"],
+      "open_to": ["Industry C"],
+      "avoid": ["Industry D", "Industry E"]
+    },
+    "tech_stack": {
+      "strong": ["Language/framework you know well"],
+      "familiar": ["Language/framework you know a bit"],
+      "avoid": ["Tech you don't want to work with"]
+    },
+    "environment": {
+      "values": [
+        "What matters to you in a workplace",
+        "e.g. Autonomous work, minimal micromanagement",
+        "e.g. Work-life balance respected"
+      ],
+      "red_flags": [
+        "Things that would put you off a role",
+        "e.g. On-call culture without compensation",
+        "e.g. High turnover signals"
+      ]
+    },
+    "role_level": "e.g. Senior / Lead / Principal",
+    "open_to_management": false,
+    "notice_period_weeks": 4,
+    "right_to_work": "e.g. UK, EU, US — no sponsorship needed"
+  }
+}
