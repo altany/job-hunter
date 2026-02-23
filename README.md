@@ -395,20 +395,3 @@ Your CV and preferences stay entirely on your machine. The only external service
 
 Nothing is sent to any third-party service.
 
----
-
-## Local setup
-
-```bash
-# 1. Go into the project
-cd ~/Dev/job-hunter
-
-# 2. Install dependencies
-npm install
-
-# 3. Create your config (one-time)
-cp config.example.json config.json
-# → open config.json and fill in your paths, spreadsheet ID, and preferences
-```
-
-To verify it's working, run `node src/index.js` — if it hangs waiting for input, it's working correctly (that's how MCP servers behave).
