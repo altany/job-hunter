@@ -6,7 +6,7 @@ Once set up, you interact with it through natural language in Claude. Say things
 - *"Rate this job ad for me"* → paste a job posting, get a scored breakdown
 - *"Add that to my tracker as Applied"* → logs it to Google Sheets
 - *"Show me everything I'm interviewing for"* → your full pipeline
-- *"Create a doc for Stripe and add their interview process"* → Google Doc with notes
+- *"Show me my Stripe notes"* → opens a Google Doc for that application
 - *"Prep me for my Linear interview — it's a behavioural round"* → full prep pack
 
 ---
@@ -21,7 +21,7 @@ Once set up, you interact with it through natural language in Claude. Say things
 | `add_application` | "Add this to my tracker as Saved" |
 | `update_application` | "Mark Stripe as Interview" |
 | `get_applications` | "Show me my full pipeline" / "What am I currently interviewing for?" |
-| `get_application_doc` | "Show me my Stripe notes" — creates a Google Doc on first use |
+| `get_application_doc` | "Show me my Stripe notes" — reads the linked Google Doc for that application |
 | `update_application_doc` | "Add to my Stripe doc: 4 interview stages, take-home first" |
 | `prep_interview` | "Prep me for my Stripe final round interview" |
 | `add_interview_note` | "Log that I passed the Stripe phone screen" |
@@ -148,15 +148,20 @@ The service account needs permission to edit your spreadsheet.
 
 ---
 
-## Step 6: Set up the Google Drive folder for interview docs (optional but recommended)
+## Step 6: Create Google Docs for your applications
 
-The tool creates a Google Doc for each job application when you ask for notes. By default it creates them in the root of your Drive. If you'd like them in a specific folder:
+For each job you want to track in detail, create a Google Doc manually and link it to your tracker.
 
-1. Open [drive.google.com](https://drive.google.com)
-2. Create a folder — e.g. `Jobs` with a subfolder `Job Hunter MCP` inside it
-3. Right-click the inner folder → **Share** → paste your service account email → give it **Editor** access
+1. Open [drive.google.com](https://drive.google.com) and create a doc wherever you like (e.g. in a `Jobs` folder)
+2. Name it something like `Stripe — Senior Engineer | Interview Notes`
+3. Copy the doc URL from your browser
+4. Tell Claude: *"Link this doc to my Stripe application: [paste URL]"* — it will store it in your tracker
 
-If you skip this step, docs will just be created in the root of your Drive — it still works fine.
+Once linked, you can say things like:
+- *"Show me my Stripe notes"* — returns the full doc content
+- *"Add to my Strip doc: their process is 4 rounds, starting with a take-home"* — appends a new section
+
+> **Note:** Automatic doc creation via the tool is not currently supported due to Google Drive API permission limitations with service accounts on personal Drive.
 
 ---
 
@@ -404,4 +409,3 @@ cp config.example.json config.json
 ```
 
 To verify it's working, run `node src/index.js` — if it hangs waiting for input, it's working correctly (that's how MCP servers behave).
-
