@@ -355,6 +355,92 @@ Try these in Claude Desktop after restarting:
 
 ---
 
+## Utility Scripts
+
+These scripts live in `scripts/` and are run manually from the command line. They use the same service account credentials as the main tool.
+
+---
+
+### `format-doc-headings.js` — Format Google Doc headings
+
+Converts ASCII-style section dividers in an application doc into proper Google Doc heading styles (H2–H5), so the document outline and navigation work correctly.
+
+**Run it:**
+```bash
+node scripts/format-doc-headings.js <docId>
+```
+
+**Example:**
+```bash
+node scripts/format-doc-headings.js 1HCpkACzu-kTVnRwf_GddXzxGyu12345678910E2PSXw
+```
+
+The doc ID is the string between `/d/` and `/edit` in the Google Doc URL.
+
+**To run it on all your docs at once:**
+```bash
+for id in <docId1> <docId2> <docId3>; do node scripts/format-doc-headings.js $id; done
+```
+
+**What it converts:**
+
+| Format in doc | Becomes |
+|---------------|---------|
+| Long `━━━` line / TEXT / long `━━━` line | Heading 2 |
+| Short `━━━` line / TEXT / short `━━━` line | Heading 3 |
+| `--- TEXT ---` | Heading 4 |
+| `-- TEXT --` | Heading 5 |
+
+**Nothing to change** — the script reads credentials from `config.json` automatically.
+
+---
+
+### `format-sheet-status.js` — Style and sort the tracker spreadsheet
+
+Applies visual formatting to your Applications sheet and sorts rows by status priority. Run this after adding new applications or whenever you want to re-sort.
+
+**Run it:**
+```bash
+node scripts/format-sheet-status.js
+```
+
+**What it does:**
+- Colours each row by status (pale green = Interview, pale blue = Applied, etc.)
+- Strikethrough + grey text on Rejected and Withdrawn rows
+- Paler font on Saved rows
+- Colour scale on the Rating column (red → yellow → green)
+- Dropdown validation on the Status column
+- Sorts rows by status priority: **Offer → Interview → Applied → Phone Screen → Saved → Rejected → Withdrawn**
+- Secondary sort: Rating descending within each group
+
+**Things to check before running for the first time:**
+
+| Constant | Location in script | What to set |
+|---|---|---|
+| `SPREADSHEET_ID` | Top of file | Your spreadsheet ID (from the URL) |
+| `SHEET_ID` | Top of file | The numeric ID of your Applications tab — find it in the URL after `gid=` when you have that tab open |
+| `STATUS_COL_INDEX` | Top of file | 0-based column index of your Status column (e.g. `8` = column I) |
+| `RATING_COL_INDEX` | Top of file | 0-based column index of your Rating column (e.g. `7` = column H) |
+
+> **Column index reference:** A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, J=9 ...
+
+**To customise the status sort order**, edit the `STATUS_ORDER` array near the top of the script:
+```js
+const STATUS_ORDER = ["Offer", "Interview", "Applied", "Phone Screen", "Saved", "Rejected", "Withdrawn"];
+```
+
+**To customise the status colours**, edit the `STATUS_COLOURS` object. Colours are RGB values between 0 and 1:
+```js
+const STATUS_COLOURS = {
+  Interview: { red: 0.85, green: 0.94, blue: 0.85 },  // pale green
+  Applied:   { red: 0.85, green: 0.90, blue: 0.98 },  // pale blue
+  // ...
+};
+```
+
+
+---
+
 ## File structure
 
 ```
@@ -363,6 +449,9 @@ job-hunter/
 │   ├── index.js          # MCP server + all tool definitions and prompts
 │   ├── sheets.js         # Google Sheets + Docs read/write
 │   └── cv.js             # CV loading (PDF, DOCX, MD, TXT, TS, JSON)
+├── scripts/
+│   ├── format-doc-headings.js    # Convert ASCII headings to Google Doc styles
+│   └── format-sheet-status.js   # Style and sort the Applications sheet
 ├── context/              # Your personal context files (gitignored)
 │   └── candidate_knowledge_base.md
 ├── config.json           # Your config (gitignored)
@@ -394,4 +483,3 @@ Your CV and preferences stay entirely on your machine. The only external service
 - **Claude** — the AI that generates ratings, cover letters, prep materials etc.
 
 Nothing is sent to any third-party service.
-
