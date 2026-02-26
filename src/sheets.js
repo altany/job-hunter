@@ -180,6 +180,22 @@ export class GoogleSheetsClient {
       updates.push({ col: colLetter(COL.SALARY), value: args.salary_offered });
     }
 
+    if (args.job_url) {
+      updates.push({ col: colLetter(COL.URL), value: args.job_url });
+    }
+
+    if (args.salary || args.salary_offered) {
+      updates.push({ col: colLetter(COL.SALARY), value: args.salary_offered || args.salary });
+    }
+
+    if (args.work_type) {
+      updates.push({ col: colLetter(COL.WORK_TYPE), value: args.work_type });
+    }
+
+    if (args.location) {
+      updates.push({ col: colLetter(COL.LOCATION), value: args.location });
+    }
+
     if (args.doc_url) {
       updates.push({ col: colLetter(COL.DOC_URL), value: args.doc_url });
     }
@@ -195,7 +211,7 @@ export class GoogleSheetsClient {
       });
     }
 
-    return `✅ Updated "${args.role_title}" at ${args.company_name}${args.status ? ` → ${args.status}` : ""}${args.rating != null ? ` | ⭐ ${args.rating}/10` : ""}${args.doc_url ? ` | 📄 Doc linked` : ""}.`;
+    return `✅ Updated "${args.role_title}" at ${args.company_name}${args.status ? ` → ${args.status}` : ""}${args.rating != null ? ` | ⭐ ${args.rating}/10` : ""}${args.job_url ? ` | 🔗 URL updated` : ""}${args.doc_url ? ` | 📄 Doc linked` : ""}.`;
   }
 
   async getApplications(statusFilter) {
