@@ -214,24 +214,10 @@ async function run() {
     }),
 
     // Color scale on Rating column
-    {
-      addConditionalFormatRule: {
-        rule: {
-          ranges: [{
-            sheetId: SHEET_ID,
-            startRowIndex: 1,
-            startColumnIndex: RATING_COL_INDEX,
-            endColumnIndex: RATING_COL_INDEX + 1,
-          }],
-          gradientRule: {
-            minpoint: { color: { red: 0.96, green: 0.80, blue: 0.80 }, type: "NUMBER", value: "1" },
-            midpoint: { color: { red: 0.99, green: 0.97, blue: 0.82 }, type: "NUMBER", value: "5" },
-            maxpoint: { color: { red: 0.85, green: 0.94, blue: 0.85 }, type: "NUMBER", value: "10" },
-          },
-        },
-        index: 0,
-      },
-    },
+    // NOTE: index is omitted here — this rule is added in a SEPARATE batchUpdate
+    // after all booleanRules, so it ends up at index 0 (highest priority).
+    // We use a placeholder here and handle it separately below.
+    // -- handled in step 3 below --
 
     // Dropdown validation on Status column (I) only
     {
@@ -259,9 +245,74 @@ async function run() {
     requestBody: { requests },
   });
 
-  console.log("  Formatting applied ✅");
+  console.log("  Boolean formatting applied ✅");
 
-  // 3. Sort rows by status priority
+  // 3. Re-write Rating column values as real numbers.
+  //    The MCP tool writes ratings as strings ("8.5", "10") which means the Sheets
+  //    gradient rule silently skips them — gradientRules only work on numeric cells.
+  //    Reading and re-writing with valueInputOption USER_ENTERED forces Sheets to
+  //    parse them as numbers in place.
+  console.log("  Coercing Rating column to numbers...");
+  const ratingRead = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `Applications!H2:H1000`,
+  });
+  const ratingRows = ratingRead.data.values || [];
+  if (ratingRows.length > 0) {
+    const coerced = ratingRows.map(([v] = [""]) => {
+      const n = parseFloat(v);
+      return [isNaN(n) ? "" : n];
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Applications!H2:H${1 + ratingRows.length}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: coerced },
+    });
+    console.log(`  Coerced ${ratingRows.length} rating cells ✅`);
+  }
+
+  // 4. Gradient rule for Rating column — added in a SEPARATE batchUpdate so it
+  //    gets index 0 (highest priority) and wins over the row-background booleanRules
+  //    on the Rating cell only. Also uses colorStyle.rgbColor (not deprecated `color`).
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [{
+        addConditionalFormatRule: {
+          rule: {
+            ranges: [{
+              sheetId: SHEET_ID,
+              startRowIndex: 1,
+              startColumnIndex: RATING_COL_INDEX,
+              endColumnIndex: RATING_COL_INDEX + 1,
+            }],
+            gradientRule: {
+              minpoint: {
+                colorStyle: { rgbColor: { red: 0.96, green: 0.80, blue: 0.80 } },
+                type: "NUMBER",
+                value: "1",
+              },
+              midpoint: {
+                colorStyle: { rgbColor: { red: 0.99, green: 0.97, blue: 0.82 } },
+                type: "NUMBER",
+                value: "5",
+              },
+              maxpoint: {
+                colorStyle: { rgbColor: { red: 0.85, green: 0.94, blue: 0.85 } },
+                type: "NUMBER",
+                value: "10",
+              },
+            },
+          },
+          index: 0,
+        },
+      }],
+    },
+  });
+  console.log("  Gradient rule applied to Rating column ✅");
+
+  // 5. Sort rows by status priority
   await sortByStatus();
 
   console.log("\n✅ Done!");
