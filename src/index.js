@@ -406,7 +406,8 @@ Use web_search to find the following. Do not skip this step.
 **Salary:**
 - If salary not provided, search: "${args.company_name} ${args.role_title} salary UK" and "${args.company_name} ${args.role_title} salary your region remote"
 - The candidate is based in your region — many companies geo-adjust. Flag if this is likely.
-- Compare findings against candidate's minimum (£90k) and target (£110k)
+- Compare findings against candidate's minimum (£70k) and target (£90k)
+- NOTE: candidate will accept below target for exceptional WLB — salary is secondary to work-life balance
 
 **Interview process:**
 - Search: "${args.company_name} interview process engineer" or check their careers page
@@ -427,12 +428,13 @@ Use web_search to find the following. Do not skip this step.
 ### Step 2: Dealbreaker check
 Before scoring, explicitly check each of these. Flag any that are a concern:
 - ❌ Onsite or hybrid required (dealbreaker)
-- ❌ On-call rotation (dealbreaker)  
-- ❌ Salary likely below £90k after geo-adjustment (dealbreaker)
+- ❌ On-call rotation of ANY kind (dealbreaker) — search JD text explicitly for: "on-call", "rotation", "pager", "incident response", "out of hours". Also check engineering blog and Glassdoor for mentions.
+- ❌ Salary likely below £70k after geo-adjustment (dealbreaker)
 - ❌ People management expected (dealbreaker)
 - ❌ Defence / gambling / crypto industry (dealbreaker)
+- ❌ "Remote-friendly" but not truly async/remote-first — check if team is co-located with remote as exception
 - ⚠️ Live coding interviews (concern given candidate's preference)
-- ⚠️ High-pressure / fast-paced culture with poor WLB signals
+- ⚠️ High-pressure / fast-paced / always-on culture (WLB is candidate's top priority right now)
 
 If any ❌ dealbreakers are present, state this clearly at the top and recommend skipping.
 
@@ -452,8 +454,8 @@ List each dealbreaker with status.
 | Dimension | Score | Notes |
 |-----------|-------|-------|
 | Skills Match | /10 | Specific gaps or strengths |
-| Salary Match | /10 | Based on researched data, not just what's listed |
-| Remote/WLB | /10 | Include culture signals from research |
+| Salary Match | /10 | Based on researched data. Note: candidate accepts lower salary for great WLB |
+| Remote/WLB | /10 | **Top priority** — sustainable pace, no on-call, async culture, chill environment. Weight this heavily. |
 | Industry/Product Fit | /10 | Is this the kind of product complexity the candidate wants? |
 | Environment & Culture | /10 | Eng-specific Glassdoor signals, async culture, team size |
 | Pipeline Comparison | /10 | How does this compare to active applications? |
