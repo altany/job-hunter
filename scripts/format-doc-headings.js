@@ -16,6 +16,9 @@
  *   --- TOPIC NAME ---        → HEADING_4  (triple dash, topics within a sub-section)
  *   -- ITEM NAME --           → HEADING_5  (double dash, named items within a topic)
  *
+ * TABLE STYLING:
+ *   All tables     → dark header row + alternating row colours + subtle borders
+ *
  * INLINE MARKDOWN FORMATTING:
  *   ***text*** or **_text_**  → bold + italic
  *   **text**                  → bold
@@ -415,6 +418,258 @@ async function processMarkdownParagraph(docId, paraInfo) {
 // MAIN
 // ─────────────────────────────────────────────
 
+
+// ─────────────────────────────────────────────
+// MARKDOWN TABLE CONVERSION + STYLING
+// ─────────────────────────────────────────────
+
+// Colours — Cleo palette
+const TABLE_HEADER_BG  = { red: 0.278, green: 0.125, blue: 0.110 }; // #47201C
+const TABLE_HEADER_FG  = { red: 1,     green: 1,     blue: 1     }; // #ffffff
+const TABLE_ROW_ALT_BG = { red: 0.973, green: 0.965, blue: 0.957 }; // #F8F6F2
+const TABLE_BORDER_CLR = { red: 0.941, green: 0.929, blue: 0.918 }; // #F0EDEA
+
+/**
+ * Parse a markdown table pipe row into cell text values.
+ * "| foo | bar | baz |" → ["foo", "bar", "baz"]
+ */
+function parsePipeRow(text) {
+  return text
+    .split("|")
+    .map((s) => s.trim())
+    .filter((_, i, arr) => i > 0 && i < arr.length - 1); // drop empty first/last
+}
+
+function isSeparatorRow(text) {
+  // |---|---| or |:---|:---:| etc.
+  return /^\|[-| :]+\|$/.test(text.trim());
+}
+
+function isPipeRow(text) {
+  const t = text.trim();
+  return t.startsWith("|") && t.endsWith("|") && !isSeparatorRow(t);
+}
+
+/**
+ * Scan body for groups of consecutive pipe-row paragraphs that form a markdown table.
+ * Returns array of { startIndex, endIndex, headerCells, dataRows }
+ * where startIndex/endIndex cover all the paragraphs to delete.
+ */
+function findMarkdownTables(body) {
+  const tables = [];
+  let i = 0;
+
+  while (i < body.length) {
+    const el = body[i];
+    if (!el.paragraph) { i++; continue; }
+
+    const text = paraText(el);
+    if (!isPipeRow(text)) { i++; continue; }
+
+    // Collect consecutive pipe rows
+    const group = [];
+    let j = i;
+    while (j < body.length) {
+      const el2 = body[j];
+      if (!el2.paragraph) break;
+      const t2 = paraText(el2);
+      if (!isPipeRow(t2) && !isSeparatorRow(t2)) break;
+      group.push({ el: el2, text: t2, isSep: isSeparatorRow(t2) });
+      j++;
+    }
+
+    // Need at least header + separator + 1 data row
+    const sepIdx = group.findIndex((r) => r.isSep);
+    if (sepIdx === 1 && group.length >= 3) {
+      const headerCells = parsePipeRow(group[0].text);
+      const dataRows = group
+        .slice(sepIdx + 1)
+        .filter((r) => !r.isSep)
+        .map((r) => parsePipeRow(r.text));
+
+      const firstEl = group[0].el;
+      const lastEl  = group[group.length - 1].el;
+
+      tables.push({
+        startIndex: firstEl.startIndex,
+        endIndex:   lastEl.endIndex,
+        headerCells,
+        dataRows,
+        numRows: group.length,
+      });
+    }
+
+    i = j;
+  }
+
+  return tables;
+}
+
+/**
+ * Convert a single markdown table to a real Google Docs table with styling.
+ *
+ * Strategy:
+ *   1. Delete all the pipe-row paragraphs.
+ *   2. Insert a real table at that position.
+ *   3. Fill each cell.
+ *   4. Apply header + alternating row styling.
+ */
+async function convertMarkdownTable(docId, tableInfo) {
+  const { startIndex, endIndex, headerCells, dataRows } = tableInfo;
+  const numCols = headerCells.length;
+  const numRows = 1 + dataRows.length; // header + data
+
+  // Step 1: delete the markdown text (keep trailing newline of last para)
+  await docs.documents.batchUpdate({
+    documentId: docId,
+    requestBody: {
+      requests: [{
+        deleteContentRange: {
+          range: { startIndex, endIndex: endIndex - 1 },
+        },
+      }],
+    },
+  });
+
+  // Step 2: insert real table at startIndex
+  await docs.documents.batchUpdate({
+    documentId: docId,
+    requestBody: {
+      requests: [{
+        insertTable: {
+          rows: numRows,
+          columns: numCols,
+          location: { index: startIndex },
+        },
+      }],
+    },
+  });
+
+  // Step 3: re-fetch to get the new table's cell indices
+  const res = await docs.documents.get({ documentId: docId });
+  const body = res.data.body.content;
+
+  // Find the newly inserted table (first table at or after startIndex)
+  let tableEl = null;
+  for (const el of body) {
+    if (el.table && el.startIndex >= startIndex) {
+      tableEl = el;
+      break;
+    }
+  }
+  if (!tableEl) throw new Error("Could not find inserted table");
+
+  // Step 4: fill cells — build all insert + style requests
+  const allRows = [headerCells, ...dataRows];
+  const insertRequests = [];
+  const styleRequests = [];
+
+  for (let r = 0; r < tableEl.table.tableRows.length; r++) {
+    const row = tableEl.table.tableRows[r];
+    const isHeader = r === 0;
+    const isAlt    = !isHeader && r % 2 === 0;
+
+    const bgColor = isHeader ? TABLE_HEADER_BG
+                  : isAlt    ? TABLE_ROW_ALT_BG
+                             : { red: 1, green: 1, blue: 1 };
+
+    for (let c = 0; c < row.tableCells.length; c++) {
+      const cell     = row.tableCells[c];
+      const cellText = (allRows[r] && allRows[r][c]) ? allRows[r][c] : "";
+
+      // The cell has one empty paragraph — insert text at its start
+      const cellContentStart = cell.content[0].startIndex;
+
+      if (cellText) {
+        insertRequests.push({
+          insertText: {
+            location: { index: cellContentStart },
+            text: cellText,
+          },
+        });
+      }
+
+      // Cell background + borders
+      styleRequests.push({
+        updateTableCellStyle: {
+          tableRange: {
+            tableCellLocation: {
+              tableStartLocation: { index: tableEl.startIndex },
+              rowIndex: r,
+              columnIndex: c,
+            },
+            rowSpan: 1,
+            columnSpan: 1,
+          },
+          tableCellStyle: {
+            backgroundColor: { color: { rgbColor: bgColor } },
+            borderLeft:   { color: { color: { rgbColor: TABLE_BORDER_CLR } }, width: { magnitude: 1, unit: "PT" }, dashStyle: "SOLID" },
+            borderRight:  { color: { color: { rgbColor: TABLE_BORDER_CLR } }, width: { magnitude: 1, unit: "PT" }, dashStyle: "SOLID" },
+            borderTop:    { color: { color: { rgbColor: TABLE_BORDER_CLR } }, width: { magnitude: 1, unit: "PT" }, dashStyle: "SOLID" },
+            borderBottom: { color: { color: { rgbColor: TABLE_BORDER_CLR } }, width: { magnitude: 1, unit: "PT" }, dashStyle: "SOLID" },
+          },
+          fields: "backgroundColor,borderLeft,borderRight,borderTop,borderBottom",
+        },
+      });
+    }
+  }
+
+  // Insert all text — must be done in reverse order to preserve indices
+  const reversedInserts = [...insertRequests].reverse();
+  const BATCH = 20;
+  for (let i = 0; i < reversedInserts.length; i += BATCH) {
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: { requests: reversedInserts.slice(i, i + BATCH) },
+    });
+  }
+
+  // Apply cell styles
+  for (let i = 0; i < styleRequests.length; i += BATCH) {
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: { requests: styleRequests.slice(i, i + BATCH) },
+    });
+  }
+
+  // Apply bold + white text to header row
+  // Re-fetch once more to get correct text indices after inserts
+  const res2 = await docs.documents.get({ documentId: docId });
+  const tableEl2 = res2.data.body.content.find(
+    (el) => el.table && el.startIndex >= startIndex
+  );
+  if (!tableEl2) return;
+
+  const headerTextRequests = [];
+  const headerRow = tableEl2.table.tableRows[0];
+  for (const cell of headerRow.tableCells) {
+    for (const paraEl of cell.content || []) {
+      if (!paraEl.paragraph) continue;
+      for (const elem of paraEl.paragraph.elements || []) {
+        if (!elem.textRun || elem.startIndex === elem.endIndex) continue;
+        headerTextRequests.push({
+          updateTextStyle: {
+            range: { startIndex: elem.startIndex, endIndex: elem.endIndex },
+            textStyle: {
+              bold: true,
+              foregroundColor: { color: { rgbColor: TABLE_HEADER_FG } },
+            },
+            fields: "bold,foregroundColor",
+          },
+        });
+      }
+    }
+  }
+
+  if (headerTextRequests.length > 0) {
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: { requests: headerTextRequests },
+    });
+  }
+}
+
+
 async function reformatDoc(docId) {
   console.log(`\n📄 Fetching doc: ${docId}`);
   let res = await docs.documents.get({ documentId: docId });
@@ -469,6 +724,34 @@ async function reformatDoc(docId) {
       try {
         await processMarkdownParagraph(docId, para);
         console.log("✅");
+      } catch (err) {
+        console.log(`❌ ${err.message}`);
+      }
+    }
+  }
+
+
+  // ── 3. Markdown tables → real Google Docs tables ──
+  // Re-fetch after markdown changes (indices may have shifted)
+  res = await docs.documents.get({ documentId: docId });
+  const mdTables = findMarkdownTables(res.data.body.content);
+
+  if (mdTables.length === 0) {
+    console.log("  ✅ No markdown tables found.");
+  } else {
+    console.log(`\n📊 Found ${mdTables.length} markdown table(s) to convert:`);
+    console.log("");
+
+    // Process bottom-to-top so indices stay valid after deletions
+    const sorted = [...mdTables].sort((a, b) => b.startIndex - a.startIndex);
+
+    for (const t of sorted) {
+      process.stdout.write(`  Converting table (${1 + t.dataRows.length} rows × ${t.headerCells.length} cols): "${t.headerCells.join(" | ")}"... `);
+      try {
+        await convertMarkdownTable(docId, t);
+        console.log("✅");
+        // Re-fetch between tables so indices are always fresh
+        res = await docs.documents.get({ documentId: docId });
       } catch (err) {
         console.log(`❌ ${err.message}`);
       }
