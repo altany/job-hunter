@@ -19,6 +19,10 @@
  * TABLE STYLING:
  *   All tables     → dark header row + alternating row colours + subtle borders
  *
+ * BLOCK MARKDOWN:
+ *   ---              → horizontal rule (border below paragraph)
+ *   ```...```        → code block (monospace + grey background, preserves line breaks)
+ *
  * INLINE MARKDOWN FORMATTING:
  *   ***text*** or **_text_**  → bold + italic
  *   **text**                  → bold
@@ -670,6 +674,190 @@ async function convertMarkdownTable(docId, tableInfo) {
 }
 
 
+// ─────────────────────────────────────────────
+// HORIZONTAL RULES  (---)
+// ─────────────────────────────────────────────
+
+function findHorizontalRules(body) {
+  const found = [];
+  for (const el of body) {
+    if (!el.paragraph) continue;
+    const text = paraText(el).trim();
+    if (text === "---") {
+      found.push({ startIndex: el.startIndex, endIndex: el.endIndex });
+    }
+  }
+  return found;
+}
+
+/**
+ * Convert a "---" paragraph into a horizontal rule by:
+ *   1. Clearing the text content
+ *   2. Applying a thick bottom border to the paragraph style
+ */
+async function processHorizontalRule(docId, ruleInfo) {
+  const { startIndex, endIndex } = ruleInfo;
+
+  // Delete the "---" text (keep the newline)
+  await docs.documents.batchUpdate({
+    documentId: docId,
+    requestBody: {
+      requests: [
+        {
+          deleteContentRange: {
+            range: { startIndex, endIndex: endIndex - 1 },
+          },
+        },
+      ],
+    },
+  });
+
+  // Apply a bottom border to the now-empty paragraph to act as a visual rule
+  await docs.documents.batchUpdate({
+    documentId: docId,
+    requestBody: {
+      requests: [
+        {
+          updateParagraphStyle: {
+            range: { startIndex, endIndex: startIndex + 1 },
+            paragraphStyle: {
+              borderBottom: {
+                color: { color: { rgbColor: { red: 0.6, green: 0.6, blue: 0.6 } } },
+                dashStyle: "SOLID",
+                padding: { magnitude: 4, unit: "PT" },
+                width: { magnitude: 1, unit: "PT" },
+              },
+              spaceAbove: { magnitude: 6, unit: "PT" },
+              spaceBelow: { magnitude: 6, unit: "PT" },
+            },
+            fields: "borderBottom,spaceAbove,spaceBelow",
+          },
+        },
+      ],
+    },
+  });
+}
+
+// ─────────────────────────────────────────────
+// CODE BLOCKS  (```...```)
+// ─────────────────────────────────────────────
+
+const CODE_BG = { red: 0.953, green: 0.953, blue: 0.953 }; // light grey
+
+/**
+ * Find groups of paragraphs wrapped in ``` fences.
+ * Returns array of { fenceStartIndex, fenceEndIndex, contentEls }
+ * where fenceStart/End are the ``` paragraphs and contentEls are between them.
+ */
+function findCodeBlocks(body) {
+  const blocks = [];
+  let i = 0;
+
+  while (i < body.length) {
+    const el = body[i];
+    if (!el.paragraph) { i++; continue; }
+    const text = paraText(el).trim();
+
+    if (text === "```") {
+      // Find closing fence
+      let j = i + 1;
+      const contentEls = [];
+      while (j < body.length) {
+        const el2 = body[j];
+        if (el2.paragraph && paraText(el2).trim() === "```") {
+          blocks.push({
+            openFence: body[i],
+            closeFence: el2,
+            contentEls,
+          });
+          i = j + 1;
+          break;
+        }
+        contentEls.push(el2);
+        j++;
+      }
+      if (j >= body.length) break; // unclosed fence — skip
+    } else {
+      i++;
+    }
+  }
+  return blocks;
+}
+
+/**
+ * Style a code block:
+ *   1. Delete the ``` fence paragraphs
+ *   2. Apply monospace font + grey background to all content paragraphs
+ */
+async function processCodeBlock(docId, blockInfo) {
+  const { openFence, closeFence, contentEls } = blockInfo;
+
+  if (contentEls.length === 0) return;
+
+  // Style the content first (before deleting fences, so indices are stable)
+  const styleRequests = [];
+  for (const el of contentEls) {
+    if (!el.paragraph) continue;
+    // Background colour on the paragraph
+    styleRequests.push({
+      updateParagraphStyle: {
+        range: { startIndex: el.startIndex, endIndex: el.endIndex - 1 },
+        paragraphStyle: {
+          shading: { backgroundColor: { color: { rgbColor: CODE_BG } } },
+          spaceAbove: { magnitude: 0, unit: "PT" },
+          spaceBelow: { magnitude: 0, unit: "PT" },
+        },
+        fields: "shading,spaceAbove,spaceBelow",
+      },
+    });
+    // Monospace font on all text runs
+    for (const elem of el.paragraph.elements || []) {
+      if (!elem.textRun || elem.startIndex === elem.endIndex) continue;
+      styleRequests.push({
+        updateTextStyle: {
+          range: { startIndex: elem.startIndex, endIndex: elem.endIndex },
+          textStyle: {
+            weightedFontFamily: { fontFamily: "Courier New", weight: 400 },
+            fontSize: { magnitude: 10, unit: "PT" },
+          },
+          fields: "weightedFontFamily,fontSize",
+        },
+      });
+    }
+  }
+
+  const BATCH = 20;
+  for (let i = 0; i < styleRequests.length; i += BATCH) {
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: { requests: styleRequests.slice(i, i + BATCH) },
+    });
+  }
+
+  // Delete closing fence first (higher index), then opening fence
+  await docs.documents.batchUpdate({
+    documentId: docId,
+    requestBody: {
+      requests: [{
+        deleteContentRange: {
+          range: { startIndex: closeFence.startIndex, endIndex: closeFence.endIndex },
+        },
+      }],
+    },
+  });
+  await docs.documents.batchUpdate({
+    documentId: docId,
+    requestBody: {
+      requests: [{
+        deleteContentRange: {
+          range: { startIndex: openFence.startIndex, endIndex: openFence.endIndex },
+        },
+      }],
+    },
+  });
+}
+
+
 async function reformatDoc(docId) {
   console.log(`\n📄 Fetching doc: ${docId}`);
   let res = await docs.documents.get({ documentId: docId });
@@ -752,6 +940,50 @@ async function reformatDoc(docId) {
         console.log("✅");
         // Re-fetch between tables so indices are always fresh
         res = await docs.documents.get({ documentId: docId });
+      } catch (err) {
+        console.log(`❌ ${err.message}`);
+      }
+    }
+  }
+
+  // ── 4. Horizontal rules (---) ───────────────
+  res = await docs.documents.get({ documentId: docId });
+  const hrules = findHorizontalRules(res.data.body.content);
+
+  if (hrules.length === 0) {
+    console.log("  ✅ No horizontal rules found.");
+  } else {
+    console.log(`\n〰️  Found ${hrules.length} horizontal rule(s) to convert:`);
+    // Process bottom-to-top
+    const sortedRules = [...hrules].sort((a, b) => b.startIndex - a.startIndex);
+    for (const r of sortedRules) {
+      process.stdout.write(`  Converting "---" at index ${r.startIndex}... `);
+      try {
+        await processHorizontalRule(docId, r);
+        console.log("✅");
+      } catch (err) {
+        console.log(`❌ ${err.message}`);
+      }
+    }
+  }
+
+  // ── 5. Code blocks (``` ... ```) ─────────────
+  res = await docs.documents.get({ documentId: docId });
+  const codeBlocks = findCodeBlocks(res.data.body.content);
+
+  if (codeBlocks.length === 0) {
+    console.log("  ✅ No code blocks found.");
+  } else {
+    console.log(`\n💻 Found ${codeBlocks.length} code block(s) to style:`);
+    // Process bottom-to-top
+    const sortedBlocks = [...codeBlocks].sort(
+      (a, b) => b.openFence.startIndex - a.openFence.startIndex
+    );
+    for (const b of sortedBlocks) {
+      process.stdout.write(`  Styling code block (${b.contentEls.length} lines)... `);
+      try {
+        await processCodeBlock(docId, b);
+        console.log("✅");
       } catch (err) {
         console.log(`❌ ${err.message}`);
       }
