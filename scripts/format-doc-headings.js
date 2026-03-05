@@ -20,6 +20,7 @@
  *   All tables     → dark header row + alternating row colours + subtle borders
  *
  * BLOCK MARKDOWN:
+ *   - item           → bullet list (BULLET_DISC_CIRCLE_SQUARE preset)
  *   ---              → horizontal rule (border below paragraph)
  *   ```...```        → code block (monospace + grey background, preserves line breaks)
  *
@@ -675,6 +676,109 @@ async function convertMarkdownTable(docId, tableInfo) {
 
 
 // ─────────────────────────────────────────────
+// BULLET LISTS  (- item)
+// ─────────────────────────────────────────────
+
+/**
+ * Find consecutive paragraphs starting with "- " (but not "---").
+ * Skips paragraphs that already have a bullet list style applied.
+ * Returns groups of contiguous bullet paragraphs.
+ */
+function findBulletGroups(body) {
+  const groups = [];
+  let current = [];
+
+  for (const el of body) {
+    if (!el.paragraph) {
+      if (current.length) { groups.push(current); current = []; }
+      continue;
+    }
+
+    // Skip if already a list item
+    const alreadyBullet = !!el.paragraph.bullet;
+    const text = paraText(el);
+    // Must start with "- " followed by non-whitespace, and not be "---"
+    const trimmed = text.trim();
+    const isBullet = /^- \S/.test(trimmed) && trimmed !== "---" && !alreadyBullet;
+
+    if (isBullet) {
+      current.push(el);
+    } else {
+      if (current.length) { groups.push(current); current = []; }
+    }
+  }
+  if (current.length) groups.push(current);
+  return groups;
+}
+
+/**
+ * Convert a group of "- text" paragraphs into real Google Docs bullets.
+ *
+ * Strategy: delete all "- " prefixes bottom-to-top in a single pass,
+ * then apply createParagraphBullets using the startIndex of the first
+ * paragraph (which hasn't shifted since we process top paragraph last).
+ */
+async function processBulletGroup(docId, els) {
+  // Sort bottom-to-top so deletions don't shift earlier indices
+  const sorted = [...els].sort((a, b) => b.startIndex - a.startIndex);
+
+  // Delete "- " (2 chars) from start of each paragraph
+  for (const el of sorted) {
+    // Find offset of "- " within the paragraph (may be indented)
+    const text = paraText(el);
+    const dashOffset = text.indexOf("- ");
+    const deleteStart = el.startIndex + dashOffset;
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: {
+        requests: [{
+          deleteContentRange: {
+            range: { startIndex: deleteStart, endIndex: deleteStart + 2 },
+          },
+        }],
+      },
+    });
+  }
+
+  // Re-fetch to get accurate indices after deletions
+  const res = await docs.documents.get({ documentId: docId });
+  const body = res.data.body.content;
+
+  // The first paragraph (lowest startIndex) shifted by 0 (we deleted from bottom up).
+  // Find it by its original startIndex — it hasn't changed.
+  const firstOriginalStart = els.reduce((min, el) => Math.min(min, el.startIndex), Infinity);
+  const lastOriginalStart  = els.reduce((max, el) => Math.max(max, el.startIndex), -Infinity);
+
+  // Each "- " deletion (2 chars) shifts subsequent paragraphs by -2.
+  // Paragraph at position i (0-indexed from top of group) shifts by -(number of paras below it that were deleted).
+  // Since we deleted bottom-to-top, the first para is unshifted.
+  const firstEl = body.find((el) => el.paragraph && el.startIndex === firstOriginalStart);
+
+  // Last para: shifted by -2 * (els.length - 1) deletions above it... wait —
+  // bottom-to-top means we delete the LAST para first, so its deletion
+  // doesn't affect earlier ones. The FIRST para (top) is deleted last,
+  // so all others have already been processed.
+  // Net: first para startIndex unchanged. Last para shifted by -2*(els.length-1).
+  const lastShiftedStart = lastOriginalStart - 2 * (els.length - 1);
+  const lastEl = body.find((el) => el.paragraph && el.startIndex === lastShiftedStart);
+
+  if (!firstEl || !lastEl) return;
+
+  await docs.documents.batchUpdate({
+    documentId: docId,
+    requestBody: {
+      requests: [{
+        createParagraphBullets: {
+          range: { startIndex: firstEl.startIndex, endIndex: lastEl.endIndex - 1 },
+          bulletPreset: "BULLET_DISC_CIRCLE_SQUARE",
+        },
+      }],
+    },
+  });
+}
+
+
+// ─────────────────────────────────────────────
 // HORIZONTAL RULES  (---)
 // ─────────────────────────────────────────────
 
@@ -946,7 +1050,30 @@ async function reformatDoc(docId) {
     }
   }
 
-  // ── 4. Horizontal rules (---) ───────────────
+  // ── 4. Bullet lists (- item) ────────────────
+  res = await docs.documents.get({ documentId: docId });
+  const bulletGroups = findBulletGroups(res.data.body.content);
+
+  if (bulletGroups.length === 0) {
+    console.log("  ✅ No bullet lists found.");
+  } else {
+    console.log(`\n• Found ${bulletGroups.length} bullet group(s) to convert:`);
+    // Process bottom-to-top
+    const sortedGroups = [...bulletGroups].sort(
+      (a, b) => b[0].startIndex - a[0].startIndex
+    );
+    for (const group of sortedGroups) {
+      process.stdout.write(`  Converting ${group.length} bullet(s)... `);
+      try {
+        await processBulletGroup(docId, group);
+        console.log("✅");
+      } catch (err) {
+        console.log(`❌ ${err.message}`);
+      }
+    }
+  }
+
+  // ── 5. Horizontal rules (---) ───────────────
   res = await docs.documents.get({ documentId: docId });
   const hrules = findHorizontalRules(res.data.body.content);
 
@@ -967,7 +1094,7 @@ async function reformatDoc(docId) {
     }
   }
 
-  // ── 5. Code blocks (``` ... ```) ─────────────
+  // ── 6. Code blocks (``` ... ```) ─────────────
   res = await docs.documents.get({ documentId: docId });
   const codeBlocks = findCodeBlocks(res.data.body.content);
 
