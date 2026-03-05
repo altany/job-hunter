@@ -1,10 +1,10 @@
 /**
  * format-doc-headings.js
  *
- * Converts ASCII divider headings in a Google Doc into proper Heading styles
- * so the document outline and pageless mode work correctly.
+ * Converts ASCII divider headings in a Google Doc into proper Heading styles,
+ * and processes inline Markdown formatting within paragraph text.
  *
- * Heading level mapping:
+ * HEADING LEVEL MAPPING:
  *   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   → deleted
  *   SECTION NAME (between two long ━━━ lines)   → HEADING_2  (major sections)
  *   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   → deleted
@@ -15,6 +15,13 @@
  *
  *   --- TOPIC NAME ---        → HEADING_4  (triple dash, topics within a sub-section)
  *   -- ITEM NAME --           → HEADING_5  (double dash, named items within a topic)
+ *
+ * INLINE MARKDOWN FORMATTING:
+ *   ***text*** or **_text_**  → bold + italic
+ *   **text**                  → bold
+ *   _text_ or *text*          → italic
+ *   `text`                    → inline code (monospace + light background colour)
+ *   ~~text~~                  → strikethrough
  *
  * Usage (run from inside the job-hunter repo):
  *   node scripts/format-doc-headings.js <docId>
@@ -42,6 +49,10 @@ const auth = new google.auth.GoogleAuth({
 
 const docs = google.docs({ version: "v1", auth });
 
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+
 function paraText(el) {
   if (!el?.paragraph?.elements) return "";
   return el.paragraph.elements
@@ -55,16 +66,17 @@ function isRule(text) {
 }
 
 function isDashHeading(text) {
-  // Matches exactly 2 dash-like chars (- or —) as delimiter, not 3
   return /^[-—]{2} \S/.test(text) && / [-—]{2}$/.test(text) && !/^[-—]{3}/.test(text);
 }
 
 function isTripleDashHeading(text) {
-  // Matches exactly 3 dash-like chars (- or —) as delimiter
   return /^[-—]{3} \S/.test(text) && / [-—]{3}$/.test(text);
 }
 
-// Scan body for all heading patterns, return list of what to change
+// ─────────────────────────────────────────────
+// HEADING DETECTION
+// ─────────────────────────────────────────────
+
 function findHeadings(body) {
   const found = [];
   for (let i = 0; i < body.length; i++) {
@@ -88,13 +100,13 @@ function findHeadings(body) {
       }
     }
 
-    // Inline: --- HEADING --- (triple dash → HEADING_4)
+    // Inline: --- HEADING ---
     if (isTripleDashHeading(text)) {
       const headingText = text.replace(/^[-—]{3} /, "").replace(/ [-—]{3}$/, "");
       found.push({ type: "inline", level: "HEADING_4", headingText, originalText: text });
     }
 
-    // Inline: -- HEADING -- (double dash → HEADING_5)
+    // Inline: -- HEADING --
     if (isDashHeading(text)) {
       const headingText = text.replace(/^[-—]{2} /, "").replace(/ [-—]{2}$/, "");
       found.push({ type: "inline", level: "HEADING_5", headingText, originalText: text });
@@ -102,6 +114,94 @@ function findHeadings(body) {
   }
   return found;
 }
+
+// ─────────────────────────────────────────────
+// INLINE MARKDOWN DETECTION
+// ─────────────────────────────────────────────
+
+/**
+ * Parse a plain text string into segments with formatting info.
+ * Returns array of: { text, bold, italic, code, strikethrough }
+ *
+ * Order of precedence (most specific first):
+ *   ***text***  → bold + italic
+ *   **text**    → bold
+ *   _text_      → italic
+ *   *text*      → italic  (single asterisk, not double)
+ *   `text`      → code
+ *   ~~text~~    → strikethrough
+ */
+function parseInlineMarkdown(text) {
+  // Token regex — order matters: longer patterns first
+  const TOKEN = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|_(.+?)_|\*(.+?)\*|`(.+?)`|~~(.+?)~~)/g;
+
+  const segments = [];
+  let last = 0;
+  let match;
+
+  while ((match = TOKEN.exec(text)) !== null) {
+    // Plain text before this match
+    if (match.index > last) {
+      segments.push({ text: text.slice(last, match.index), bold: false, italic: false, code: false, strikethrough: false });
+    }
+
+    const full = match[0];
+    if (full.startsWith("***")) {
+      segments.push({ text: match[2], bold: true, italic: true, code: false, strikethrough: false });
+    } else if (full.startsWith("**")) {
+      segments.push({ text: match[3], bold: true, italic: false, code: false, strikethrough: false });
+    } else if (full.startsWith("_")) {
+      segments.push({ text: match[4], bold: false, italic: true, code: false, strikethrough: false });
+    } else if (full.startsWith("*")) {
+      segments.push({ text: match[5], bold: false, italic: true, code: false, strikethrough: false });
+    } else if (full.startsWith("`")) {
+      segments.push({ text: match[6], bold: false, italic: false, code: true, strikethrough: false });
+    } else if (full.startsWith("~~")) {
+      segments.push({ text: match[7], bold: false, italic: false, code: false, strikethrough: true });
+    }
+
+    last = match.index + full.length;
+  }
+
+  // Remaining plain text
+  if (last < text.length) {
+    segments.push({ text: text.slice(last), bold: false, italic: false, code: false, strikethrough: false });
+  }
+
+  return segments;
+}
+
+function hasMarkdown(text) {
+  return /(\*\*\*|\*\*|(?<!\*)\*(?!\*)|_[^_]+_|`[^`]+`|~~)/.test(text);
+}
+
+/**
+ * Find all paragraphs that contain inline markdown and need processing.
+ * Returns { paragraphIndex, startIndex, endIndex, fullText, segments }
+ */
+function findInlineMarkdown(body) {
+  const found = [];
+  for (const el of body) {
+    if (!el.paragraph) continue;
+    const text = paraText(el);
+    if (!hasMarkdown(text)) continue;
+    const segments = parseInlineMarkdown(text);
+    // Only include if at least one segment has formatting
+    if (segments.some((s) => s.bold || s.italic || s.code || s.strikethrough)) {
+      found.push({
+        startIndex: el.startIndex,
+        endIndex: el.endIndex,
+        fullText: text,
+        segments,
+      });
+    }
+  }
+  return found;
+}
+
+// ─────────────────────────────────────────────
+// HEADING PROCESSORS
+// ─────────────────────────────────────────────
 
 async function processTriple(docId, headingText, level) {
   const res = await docs.documents.get({ documentId: docId });
@@ -157,14 +257,12 @@ async function processInline(docId, headingText, originalText, level) {
     const text = paraText(el);
     if (!isDashHeading(text) && !isTripleDashHeading(text)) continue;
 
-    // FIX: use the correct stripping regex based on which pattern matched
     const parsed = isTripleDashHeading(text)
       ? text.replace(/^[-—]{3} /, "").replace(/ [-—]{3}$/, "")
       : text.replace(/^[-—]{2} /, "").replace(/ [-—]{2}$/, "");
 
     if (parsed !== headingText) continue;
 
-    // Insert clean heading text, apply the correct style, then delete original text
     await docs.documents.batchUpdate({
       documentId: docId,
       requestBody: {
@@ -172,7 +270,7 @@ async function processInline(docId, headingText, originalText, level) {
           {
             updateParagraphStyle: {
               range: { startIndex: el.startIndex, endIndex: el.endIndex - 1 },
-              paragraphStyle: { namedStyleType: level }, // FIX: use passed-in level, not hardcoded HEADING_4
+              paragraphStyle: { namedStyleType: level },
               fields: "namedStyleType",
             },
           },
@@ -186,7 +284,6 @@ async function processInline(docId, headingText, originalText, level) {
       },
     });
 
-    // Re-fetch and delete the old text (now after the inserted heading text)
     const res2 = await docs.documents.get({ documentId: docId });
     for (const el2 of res2.data.body.content) {
       if (!el2.paragraph) continue;
@@ -215,37 +312,171 @@ async function processInline(docId, headingText, originalText, level) {
   return false;
 }
 
+// ─────────────────────────────────────────────
+// INLINE MARKDOWN PROCESSOR
+// ─────────────────────────────────────────────
+
+/**
+ * Process a single paragraph: replace its content with properly formatted runs.
+ *
+ * Strategy:
+ *   1. Delete the entire paragraph content (keep the newline).
+ *   2. Insert plain text for each segment from the end backwards
+ *      (so indices stay valid).
+ *   3. Apply text style (bold/italic/code/strikethrough) to each segment.
+ *
+ * We process from the end to avoid index shifting.
+ */
+async function processMarkdownParagraph(docId, paraInfo) {
+  const { startIndex, endIndex, fullText, segments } = paraInfo;
+
+  // Step 1: delete existing paragraph content (not the trailing \n)
+  await docs.documents.batchUpdate({
+    documentId: docId,
+    requestBody: {
+      requests: [
+        {
+          deleteContentRange: {
+            range: { startIndex, endIndex: endIndex - 1 },
+          },
+        },
+      ],
+    },
+  });
+
+  // Step 2: insert segments from last to first (to keep index stable at startIndex)
+  // We insert all at startIndex in reverse order so final order is correct.
+  for (let i = segments.length - 1; i >= 0; i--) {
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: startIndex },
+              text: segments[i].text,
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  // Step 3: apply text styles — re-fetch to get correct indices
+  const res = await docs.documents.get({ documentId: docId });
+  const body = res.data.body.content;
+
+  // Find the paragraph at startIndex
+  const para = body.find((el) => el.paragraph && el.startIndex === startIndex);
+  if (!para) return;
+
+  // Walk segments and build style requests
+  const requests = [];
+  let cursor = startIndex;
+
+  for (const seg of segments) {
+    const segStart = cursor;
+    const segEnd = cursor + seg.text.length;
+    cursor = segEnd;
+
+    if (!seg.bold && !seg.italic && !seg.code && !seg.strikethrough) continue;
+
+    const textStyle = {};
+    const fields = [];
+
+    if (seg.bold) { textStyle.bold = true; fields.push("bold"); }
+    if (seg.italic) { textStyle.italic = true; fields.push("italic"); }
+    if (seg.strikethrough) { textStyle.strikethrough = true; fields.push("strikethrough"); }
+    if (seg.code) {
+      // Monospace font + light grey background for inline code
+      textStyle.weightedFontFamily = { fontFamily: "Courier New", weight: 400 };
+      textStyle.backgroundColor = { color: { rgbColor: { red: 0.95, green: 0.95, blue: 0.95 } } };
+      fields.push("weightedFontFamily", "backgroundColor");
+    }
+
+    requests.push({
+      updateTextStyle: {
+        range: { startIndex: segStart, endIndex: segEnd },
+        textStyle,
+        fields: fields.join(","),
+      },
+    });
+  }
+
+  if (requests.length > 0) {
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: { requests },
+    });
+  }
+}
+
+// ─────────────────────────────────────────────
+// MAIN
+// ─────────────────────────────────────────────
+
 async function reformatDoc(docId) {
   console.log(`\n📄 Fetching doc: ${docId}`);
-  const res = await docs.documents.get({ documentId: docId });
+  let res = await docs.documents.get({ documentId: docId });
+
+  // ── 1. Headings ──────────────────────────────
   const headings = findHeadings(res.data.body.content);
 
   if (headings.length === 0) {
-    console.log("✅ No ASCII headings found — doc may already be formatted.");
-    return;
+    console.log("  ✅ No ASCII headings found.");
+  } else {
+    console.log(`\n🔖 Found ${headings.length} heading(s) to reformat:`);
+    headings.forEach((h) => console.log(`  [${h.level}] ${h.headingText}`));
+    console.log("");
+
+    for (const h of headings) {
+      process.stdout.write(`  Formatting [${h.level}] "${h.headingText}"... `);
+      try {
+        let ok;
+        if (h.type === "triple") {
+          ok = await processTriple(docId, h.headingText, h.level);
+        } else {
+          ok = await processInline(docId, h.headingText, h.originalText, h.level);
+        }
+        console.log(ok ? "✅" : "⚠️  not found");
+      } catch (err) {
+        console.log(`❌ ${err.message}`);
+      }
+    }
   }
 
-  console.log(`\nFound ${headings.length} headings to reformat:`);
-  headings.forEach((h) => console.log(`  [${h.level}] ${h.headingText}`));
-  console.log("");
+  // ── 2. Inline markdown ───────────────────────
+  // Re-fetch after heading changes (indices may have shifted)
+  res = await docs.documents.get({ documentId: docId });
+  const markdownParas = findInlineMarkdown(res.data.body.content);
 
-  for (const h of headings) {
-    process.stdout.write(`  Formatting [${h.level}] "${h.headingText}"... `);
-    try {
-      let ok;
-      if (h.type === "triple") {
-        ok = await processTriple(docId, h.headingText, h.level);
-      } else {
-        ok = await processInline(docId, h.headingText, h.originalText, h.level); // FIX: pass h.level
+  if (markdownParas.length === 0) {
+    console.log("  ✅ No inline markdown found.");
+  } else {
+    console.log(`\n✍️  Found ${markdownParas.length} paragraph(s) with inline markdown:`);
+    markdownParas.forEach((p) => {
+      const preview = p.fullText.length > 60 ? p.fullText.slice(0, 60) + "…" : p.fullText;
+      console.log(`  "${preview}"`);
+    });
+    console.log("");
+
+    // Process from bottom to top so indices stay valid
+    const sorted = [...markdownParas].sort((a, b) => b.startIndex - a.startIndex);
+
+    for (const para of sorted) {
+      const preview = para.fullText.length > 50 ? para.fullText.slice(0, 50) + "…" : para.fullText;
+      process.stdout.write(`  Formatting "${preview}"... `);
+      try {
+        await processMarkdownParagraph(docId, para);
+        console.log("✅");
+      } catch (err) {
+        console.log(`❌ ${err.message}`);
       }
-      console.log(ok ? "✅" : "⚠️  not found");
-    } catch (err) {
-      console.log(`❌ ${err.message}`);
     }
   }
 
   console.log(`\n✅ Done!`);
-  console.log(`   https://docs.google.com/document/d/${docId}/edit`);
+  console.log(`   https://docs.google.com/document/d/${docId}/edit\n`);
 }
 
 const docId = process.argv[2];
