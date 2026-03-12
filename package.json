@@ -6,12 +6,18 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+   "chatgpt": "concurrently \"node src/chatgpt.js\" \"cloudflared tunnel run job-hunter\""
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "googleapis": "^140.0.0",
-    "pdf-parse": "^1.1.1",
-    "mammoth": "^1.7.0"
+    "mammoth": "^1.7.0",
+    "pdf-parse": "^1.1.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
