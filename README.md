@@ -425,7 +425,7 @@ In ChatGPT:
 4. Authentication: `No authentication`
 
 Once connected, ChatGPT will automatically discover all tools exposed by the MCP server.
-You can now disable Developer Mode if you want.
+Keep Developer mode enabled while using the tool.
 ---
 
 ## Testing it works
