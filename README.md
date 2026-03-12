@@ -1,8 +1,8 @@
 # 🎯 job-hunter
 
-A personal MCP (Model Context Protocol) server for Claude that helps manage a job search — rate job postings, tailor CVs, write cover letters, track applications, prep for interviews, and keep notes on each company.
+A personal MCP (Model Context Protocol) server for Claude and ChatGPT that helps manage a job search — rate job postings, tailor CVs, write cover letters, track applications, prep for interviews, and keep notes on each company.
 
-Once set up, you interact with it through natural language in Claude. Say things like:
+Once set up, you interact with it through natural language in Claude or ChatGPT. Say things like:
 - *"Rate this job ad for me"* → paste a job posting, get a scored breakdown
 - *"Add that to my tracker as Applied"* → logs it to Google Sheets
 - *"Show me everything I'm interviewing for"* → your full pipeline
@@ -28,6 +28,16 @@ Once set up, you interact with it through natural language in Claude. Say things
 
 ---
 
+## Compatibility
+
+This MCP server now works with:
+- Claude
+- ChatGPT
+
+Both clients consume the same MCP tool definitions, allowing the same workflow to run across different AI assistants.
+
+---
+
 ## Setup Overview
 
 There are 5 things to set up:
@@ -35,7 +45,7 @@ There are 5 things to set up:
 2. Set up Google Sheets (for your tracker)
 3. Set up a Google Service Account (so the tool can read/write to your Sheet and create Docs)
 4. Configure the tool
-5. Connect it to Claude Desktop
+5. Connect it to Claude Desktop or ChatGPT
 
 Take it step by step — it looks longer than it is.
 
@@ -155,7 +165,7 @@ For each job you want to track in detail, create a Google Doc manually and link 
 1. Open [drive.google.com](https://drive.google.com) and create a doc wherever you like (e.g. in a `Jobs` folder)
 2. Name it something like `Stripe — Senior Engineer | Interview Notes`
 3. Copy the doc URL from your browser
-4. Tell Claude: *"Link this doc to my Stripe application: [paste URL]"* — it will store it in your tracker
+4. Tell Claude or ChatGPT: *"Link this doc to my Stripe application: [paste URL]"* — it will store it in your tracker
 
 Once linked, you can say things like:
 - *"Show me my Stripe notes"* — returns the full doc content
@@ -255,11 +265,13 @@ The `context/` folder is gitignored — it stays on your machine only.
 
 ---
 
-## Step 9: Connect to Claude Desktop
+## Step 9: Connect to your assistant
+
+### Claude Desktop
 
 Claude Desktop is the desktop app for Claude. You need a Claude Pro account for MCP support.
 
-### 9a. Find the config file
+#### a. Find the config file
 
 Claude Desktop stores MCP server config in a file called `claude_desktop_config.json`:
 
@@ -268,7 +280,7 @@ Claude Desktop stores MCP server config in a file called `claude_desktop_config.
 
 If the file doesn't exist yet, create it.
 
-### 9b. Add the server config
+#### b. Add the server config
 
 Open the file and add (or merge into) this JSON — replace the path with the actual absolute path to `src/index.js` on your machine:
 
@@ -307,12 +319,97 @@ Open the file and add (or merge into) this JSON — replace the path with the ac
 }
 ```
 
-### 9c. Restart Claude Desktop
+#### c. Restart Claude Desktop
 
 Fully quit Claude Desktop (don't just close the window — quit it from the menu bar or taskbar) and reopen it.
 
 You should now see the job-hunter tools available in your Claude session — there'll usually be a small indicator showing MCP tools are active.
 
+
+### ChatGPT
+This MCP server was originally built for **Claude**, but it can also be used with **ChatGPT's MCP integration**.
+
+The same MCP tools work across both environments without modification.
+
+---
+
+## Exposing the MCP Server
+
+ChatGPT requires the MCP server to be accessible via a **public HTTPS URL**.
+
+A simple way to achieve this is by using a **Cloudflare Tunnel**.
+
+### Install Cloudflare Tunnel
+
+```bash
+brew install cloudflared
+```
+
+Login to your Cloudflare account:
+```bash
+cloudflared tunnel login
+```
+
+Create a tunnel:
+```bash
+cloudflared tunnel create job-hunter
+```
+
+#### Create Tunnel Configuration
+
+Create the file:
+```
+~/.cloudflared/config.yml
+```
+
+Example configuration:
+```yaml
+tunnel: job-hunter
+credentials-file: ~/.cloudflared/job-hunter.json
+
+ingress:
+  - hostname: jobhunter.yourdomain.com
+    service: http://localhost:3001
+  - service: http_status:404
+```
+
+Create the DNS route:
+```bash
+cloudflared tunnel route dns job-hunter jobhunter.yourdomain.com
+```
+
+Start the tunnel:
+```bash
+cloudflared tunnel run job-hunter
+```
+
+#### Running the MCP Server
+
+Start the MCP server locally:
+```bash
+node src/chatgpt.js
+```
+
+Or run both the server and the tunnel together:
+```bash
+npm run chatgpt
+```
+Example script in `package.json`:
+```json
+"chatgpt": "concurrently \"node src/chatgpt.js\" \"cloudflared tunnel run job-hunter\""
+```
+
+#### Connecting ChatGPT to the MCP Server
+
+In ChatGPT:
+
+1. Open Developer Mode
+2. Add a new MCP Server
+3. Enter the server URL: `https://jobhunter.yourdomain.com`
+4. Authentication: `No authentication`
+
+Once connected, ChatGPT will automatically discover all tools exposed by the MCP server.
+You can now disable Developer Mode if you want.
 ---
 
 ## Testing it works
