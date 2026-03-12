@@ -1,6 +1,6 @@
 # 🎯 job-hunter
 
-A personal MCP (Model Context Protocol) server for Claude and ChatGPT that helps manage a job search — rate job postings, tailor CVs, write cover letters, track applications, prep for interviews, and keep notes on each company.
+A personal MCP (Model Context Protocol) server that turns Claude or ChatGPT into a job search assistant — rate job postings, tailor CVs, write cover letters, track applications, prep for interviews, and keep notes on each company.
 
 Once set up, you interact with it through natural language in Claude or ChatGPT. Say things like:
 - *"Rate this job ad for me"* → paste a job posting, get a scored breakdown
@@ -25,6 +25,22 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 | `update_application_doc` | "Add to my Stripe doc: 4 interview stages, take-home first" |
 | `prep_interview` | "Prep me for my Stripe final round interview" |
 | `add_interview_note` | "Log that I passed the Stripe phone screen" |
+
+---
+
+## Architecture
+
+The MCP server exposes tools that Claude or ChatGPT can call during a conversation.
+
+The architecture is simple:
+User → Claude / ChatGPT → MCP Server → Google APIs
+
+- Claude / ChatGPT: natural language interface
+- MCP Server: exposes tools and prompts
+- Google Sheets: application tracker
+- Google Docs: interview notes
+
+The AI never accesses Google services directly — all access goes through the MCP server.
 
 ---
 
@@ -405,7 +421,7 @@ In ChatGPT:
 
 1. Open Developer Mode
 2. Add a new MCP Server
-3. Enter the server URL: `https://jobhunter.yourdomain.com`
+3. Enter the server URL: `https://jobhunter.yourdomain.com/mcp`
 4. Authentication: `No authentication`
 
 Once connected, ChatGPT will automatically discover all tools exposed by the MCP server.
