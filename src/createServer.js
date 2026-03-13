@@ -438,44 +438,60 @@ ${args.job_ad}
 ### Step 1: Research BEFORE scoring (mandatory)
 Use web_search to find the following. Do not skip this step.
 
-**Glassdoor:**
+**Glassdoor / employee reviews:**
 - Search: "${args.company_name} Glassdoor reviews 2025 2026"
-- Find: overall rating, % recommend, business outlook, WLB rating
-- IMPORTANT: Also find engineering-specific scores if possible — overall Glassdoor scores can be misleading. Search: "${args.company_name} Glassdoor software engineer reviews"
+- Find: overall rating, % recommend, business outlook, and any work-life balance signal
+- IMPORTANT: Overall scores can be misleading. Also search: "${args.company_name} Glassdoor software engineer reviews" and "${args.company_name} engineering reviews"
+- Prioritize engineering-specific signals over company-wide averages
 - Note any recurring cons, red flags, or warnings in recent (2024-2025) reviews
+- If engineering reviews mention burnout, long hours, chaos, frequent priority changes, support burden, or unclear expectations, reduce the Remote/WLB score by at least 2 points
 
 **Salary:**
-- If salary not provided, search: "${args.company_name} ${args.role_title} salary UK" and "${args.company_name} ${args.role_title} salary your region remote"
-- The candidate is based in your region — many companies geo-adjust. Flag if this is likely.
-- Compare findings against candidate's minimum (£70k) and target (£90k)
-- NOTE: candidate will accept below target for exceptional WLB — salary is secondary to work-life balance
+- First use the salary listed in the job ad, if present
+- If salary is not provided, search in this order:
+  1. official company careers page / salary calculator
+  2. reliable role-specific salary sources for this exact company and role
+  3. reputable employee-reported sources if role-specific and recent
+- Search: "${args.company_name} ${args.role_title} salary"
+- Search: "${args.company_name} compensation remote Europe"
+- Search: "${args.company_name} salary calculator"
+- The candidate is based in your region and many companies geo-adjust. Flag if this is likely
+- Compare findings against the candidate's current minimum and target from Candidate Preferences
+- If no reliable salary data is found for the specific company and role, mark Salary Match as "Unknown" rather than estimating from generic market averages
+- Do NOT infer salary from unrelated companies or broad market averages
 
 **Interview process:**
-- Search: "${args.company_name} interview process engineer" or check their careers page
+- Search: "${args.company_name} interview process engineer" or check the company's careers page
 - Flag: does it include live coding? Take-home? How many stages? Timeline?
-- Note: candidate is mindful of their interview-style preferences (noted in config) — this is relevant
+- Note: candidate is mindful of their interview-style preferences (noted in config), so this is relevant
 
 **Engineering culture:**
-- Search: "${args.company_name} engineering blog" or "${args.company_name} engineering culture"
-- How big is the eng team? Async or sync? Any on-call requirements?
+- Search: "${args.company_name} engineering blog"
+- Search: "${args.company_name} engineering culture"
+- Search: "${args.company_name} remote culture"
+- How big is the eng team? Async or sync? Any on-call, support rotation, or incident response expectations?
 - Any recent layoffs, reorgs, or leadership changes?
+- Pay close attention to whether the role expects senior engineers to act as team scalers, org multipliers, or unofficial tech leads
 
 **Recent news:**
 - Search: "${args.company_name} news 2025 2026"
-- Funding status, growth trajectory, any concerns
+- Funding status, growth trajectory, layoffs, restructuring, or other concerns
 
 ---
 
 ### Step 2: Dealbreaker check
 Before scoring, explicitly check each of these. Flag any that are a concern:
+
 - ❌ Onsite or hybrid required (dealbreaker)
-- ❌ On-call rotation of ANY kind (dealbreaker) — search JD text explicitly for: "on-call", "rotation", "pager", "incident response", "out of hours". Also check engineering blog and Glassdoor for mentions.
-- ❌ Salary likely below £70k after geo-adjustment (dealbreaker)
+- ❌ On-call rotation of ANY kind (dealbreaker) — search JD text explicitly for: "on-call", "rotation", "pager", "incident response", "out of hours", "support rotation", "support hero". Also check engineering blog and reviews for mentions
+- ❌ Salary likely below the candidate's minimum after geo-adjustment (dealbreaker)
 - ❌ People management expected (dealbreaker)
-- ❌ Defence / gambling / crypto industry (dealbreaker)
-- ❌ "Remote-friendly" but not truly async/remote-first — check if team is co-located with remote as exception
+- ❌ Industry explicitly conflicts with Candidate Preferences (dealbreaker)
+- ❌ "Remote-friendly" but not truly async/remote-first — check if the team is office-centric with remote as an exception
 - ⚠️ Live coding interviews (concern given candidate's preference)
-- ⚠️ High-pressure / fast-paced / always-on culture (WLB is candidate's top priority right now)
+- ⚠️ High-pressure / fast-paced / always-on culture
+- ⚠️ Hyper-growth VC startup expecting senior engineers to act as tech leads or org multipliers
+- ⚠️ "Senior" title appears to actually mean staff / tech lead / team-scaling role
 
 If any ❌ dealbreakers are present, state this clearly at the top and recommend skipping.
 
@@ -483,8 +499,15 @@ If any ❌ dealbreakers are present, state this clearly at the top and recommend
 
 ### Step 3: Rating
 
+#### Scoring Rules
+- Remote/WLB is the primary constraint for this candidate
+- If Remote/WLB < 7, the Overall Score should not exceed 6/10
+- If Remote/WLB < 6, the default recommendation should be Skip unless the role has exceptional compensating signals and no dealbreakers
+- If Role Level Calibration < 6 because the role is effectively staff/tech-lead level, the Overall Score should be reduced materially even if the tech stack matches
+- A calm, sustainable, mature product company should score higher than an exciting but high-pressure startup
+
 #### Research Summary
-2-3 sentences covering: Glassdoor signal, salary situation, interview process, any red flags found.
+2-3 sentences covering: engineering review signal, salary situation, interview process, and the most important red flags found.
 
 #### Dealbreaker Check: PASS / FAIL
 List each dealbreaker with status.
@@ -494,12 +517,13 @@ List each dealbreaker with status.
 #### Breakdown
 | Dimension | Score | Notes |
 |-----------|-------|-------|
-| Skills Match | /10 | Specific gaps or strengths |
-| Salary Match | /10 | Based on researched data. Note: candidate accepts lower salary for great WLB |
-| Remote/WLB | /10 | **Top priority** — sustainable pace, no on-call, async culture, chill environment. Weight this heavily. |
-| Industry/Product Fit | /10 | Is this the kind of product complexity the candidate wants? |
-| Environment & Culture | /10 | Eng-specific Glassdoor signals, async culture, team size |
-| Pipeline Comparison | /10 | How does this compare to active applications? |
+| Skills Match | /10 | Specific strengths and gaps relative to the role |
+| Salary Match | /10 | Based on reliable company-specific evidence. Use "Unknown" if evidence is insufficient |
+| Remote/WLB | /10 | **PRIMARY SIGNAL** — sustainable pace, no on-call, async culture, calm environment |
+| Product Fit for Candidate | /10 | Fit for this candidate specifically. A calmer mature product company may score higher than an exciting fast-growing startup |
+| Environment & Culture | /10 | Engineering-specific review signals, async culture, team size, support burden, layoffs/reorgs |
+| Pipeline Comparison | /10 | How does this compare to the candidate's active/saved opportunities and stated preferences? |
+| Role Level Calibration | /10 | Does "Senior" actually mean staff/tech lead internally? Flag if expectations include team scaling, org leadership, or ownership beyond a senior IC role |
 
 #### ✅ Strong Points
 Specific reasons this is a good fit, referencing the candidate's actual experience.
@@ -512,9 +536,10 @@ Anything discovered in research that wasn't visible from the job ad alone.
 
 #### 💬 Recommendation
 Clear verdict: Apply now / Save for later / Skip. 2-3 sentences max. Be direct.
+If the job is likely to create pressure, unclear expectations, or working-style mismatch with the candidate's preferences, recommend skipping even if the tech stack matches well.
 
 #### 📋 Interview Process
-What to expect based on research: stages, format, timeline, live coding risk.
+What to expect based on research: stages, format, timeline, live coding risk, and whether the process appears especially demanding.
 
 #### 📝 If You Apply — What to Lead With
 3-4 specific talking points from the candidate's CV that directly address this role's needs. Be specific — reference actual projects and metrics, not generic strengths.
