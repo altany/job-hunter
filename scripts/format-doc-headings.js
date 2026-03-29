@@ -12,8 +12,10 @@
  *   ━━━━━━━━━━━━━━━━━━━━━━   → deleted
  *   SUBSECTION NAME           → HEADING_3  (between shorter ━━━ lines)
  *   ━━━━━━━━━━━━━━━━━━━━━━   → deleted
+ *   ## HEADING TEXT           → HEADING_3  (markdown H2, alias for short ━━━ block)
  *
  *   --- TOPIC NAME ---        → HEADING_4  (triple dash, topics within a sub-section)
+ *   ### HEADING TEXT          → HEADING_4  (markdown H3, alias for --- heading)
  *   -- ITEM NAME --           → HEADING_5  (double dash, named items within a topic)
  *
  * TABLE STYLING:
@@ -81,6 +83,16 @@ function isTripleDashHeading(text) {
   return /^[-—]{3} \S/.test(text) && / [-—]{3}$/.test(text);
 }
 
+function isH2HashHeading(text) {
+  // ## HEADING TEXT  (exactly two hashes, not three)
+  return /^## (?!#)\S/.test(text.trim());
+}
+
+function isH3HashHeading(text) {
+  // ### HEADING TEXT  (exactly three hashes, not four)
+  return /^### (?!#)\S/.test(text.trim());
+}
+
 // ─────────────────────────────────────────────
 // HEADING DETECTION
 // ─────────────────────────────────────────────
@@ -118,6 +130,18 @@ function findHeadings(body) {
     if (isDashHeading(text)) {
       const headingText = text.replace(/^[-—]{2} /, "").replace(/ [-—]{2}$/, "");
       found.push({ type: "inline", level: "HEADING_5", headingText, originalText: text });
+    }
+
+    // Inline: ## HEADING  (markdown H2 → HEADING_3)
+    if (isH2HashHeading(text)) {
+      const headingText = text.trim().replace(/^## /, "");
+      found.push({ type: "hash", level: "HEADING_3", headingText, originalText: text.trim() });
+    }
+
+    // Inline: ### HEADING  (markdown H3 → HEADING_4)
+    if (isH3HashHeading(text)) {
+      const headingText = text.trim().replace(/^### /, "");
+      found.push({ type: "hash", level: "HEADING_4", headingText, originalText: text.trim() });
     }
   }
   return found;
@@ -314,6 +338,67 @@ async function processInline(docId, headingText, originalText, level) {
         });
         break;
       }
+    }
+    return true;
+  }
+  return false;
+}
+
+async function processHashHeading(docId, headingText, originalText, level) {
+  const res = await docs.documents.get({ documentId: docId });
+  const body = res.data.body.content;
+
+  for (const el of body) {
+    if (!el.paragraph) continue;
+    const text = paraText(el).trim();
+    if (!isH2HashHeading(text) && !isH3HashHeading(text)) continue;
+
+    const parsed = isH3HashHeading(text)
+      ? text.replace(/^### /, "")
+      : text.replace(/^## /, "");
+
+    if (parsed !== headingText) continue;
+
+    const prefix = isH3HashHeading(text) ? "### " : "## ";
+
+    // Step 1: delete the "## " or "### " prefix (before applying style,
+    // so the paragraph text is clean when the heading style is applied)
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: {
+        requests: [
+          {
+            deleteContentRange: {
+              range: {
+                startIndex: el.startIndex,
+                endIndex: el.startIndex + prefix.length,
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    // Step 2: re-fetch (indices shifted after deletion), then apply heading style
+    const res2 = await docs.documents.get({ documentId: docId });
+    for (const el2 of res2.data.body.content) {
+      if (!el2.paragraph) continue;
+      if (paraText(el2).trim() !== headingText) continue;
+      await docs.documents.batchUpdate({
+        documentId: docId,
+        requestBody: {
+          requests: [
+            {
+              updateParagraphStyle: {
+                range: { startIndex: el2.startIndex, endIndex: el2.endIndex - 1 },
+                paragraphStyle: { namedStyleType: level },
+                fields: "namedStyleType",
+              },
+            },
+          ],
+        },
+      });
+      break;
     }
     return true;
   }
@@ -972,7 +1057,7 @@ async function reformatDoc(docId) {
   if (headings.length === 0) {
     console.log("  ✅ No ASCII headings found.");
   } else {
-    console.log(`\n🔖 Found ${headings.length} heading(s) to reformat:`);
+    console.log(`\n🔖 Found ${headings.length} heading(s) to reformat (ASCII, dash, and markdown):`);
     headings.forEach((h) => console.log(`  [${h.level}] ${h.headingText}`));
     console.log("");
 
@@ -982,6 +1067,8 @@ async function reformatDoc(docId) {
         let ok;
         if (h.type === "triple") {
           ok = await processTriple(docId, h.headingText, h.level);
+        } else if (h.type === "hash") {
+          ok = await processHashHeading(docId, h.headingText, h.originalText, h.level);
         } else {
           ok = await processInline(docId, h.headingText, h.originalText, h.level);
         }
