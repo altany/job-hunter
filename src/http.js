@@ -41,6 +41,11 @@ export async function startHttpServer() {
 
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
+          // Respond with plain application/json instead of an SSE stream.
+          // Some hosts/clients (e.g. ChatGPT behind certain edge proxies) don't
+          // consume the text/event-stream response cleanly and surface a 502;
+          // JSON responses proxy reliably. Streaming isn't needed here.
+          enableJsonResponse: true,
           onsessioninitialized: (newSessionId) => {
             transports[newSessionId] = transport;
           },
