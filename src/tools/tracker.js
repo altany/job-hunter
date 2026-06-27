@@ -15,6 +15,7 @@ export const trackerTools = [
     name: "add_application",
     definition: {
       name: "add_application",
+      annotations: { title: "Add application", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description: "Log a new job application to your Google Sheets tracker.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
@@ -48,6 +49,7 @@ export const trackerTools = [
     name: "update_application",
     definition: {
       name: "update_application",
+      annotations: { title: "Update application", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description: "Update an existing application's status, add interview notes, or record outcomes.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
@@ -79,6 +81,7 @@ export const trackerTools = [
     name: "get_applications",
     definition: {
       name: "get_applications",
+      annotations: { title: "Get applications", readOnlyHint: true, openWorldHint: false },
       description: "View your job application pipeline — all applications and their current status.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
@@ -101,6 +104,7 @@ export const trackerTools = [
     name: "get_application_doc",
     definition: {
       name: "get_application_doc",
+      annotations: { title: "Get/create application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
         "Get the Google Doc for a specific application. If no doc exists yet, creates one automatically and links it to the tracker. Returns the doc URL and full current content.",
       securitySchemes: [{ type: "noauth" }],
@@ -150,6 +154,7 @@ export const trackerTools = [
     name: "update_application_doc",
     definition: {
       name: "update_application_doc",
+      annotations: { title: "Update application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description:
         "Add a new section to the Google Doc for a specific application. Use this to document interview stages, study notes, post-interview reflections, company research, or any other notes. The doc is created automatically if it doesn't exist yet.",
       securitySchemes: [{ type: "noauth" }],
@@ -190,6 +195,7 @@ export const trackerTools = [
     name: "add_interview_note",
     definition: {
       name: "add_interview_note",
+      annotations: { title: "Add interview note", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description: "Log interview notes, feedback, or outcomes for an application.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,

@@ -273,6 +273,7 @@ export const promptTools = [
     name: "rate_job",
     definition: {
       name: "rate_job",
+      annotations: { title: "Rate a job", readOnlyHint: true, openWorldHint: true },
       description:
         "Rate a job posting against your CV and preferences. Paste the full job ad text to get a detailed score and recommendation. IMPORTANT: Before scoring, this tool will automatically research the company on Glassdoor, check salary data (including any geo-adjustment for your location), investigate the interview process, and check for dealbreakers. You will receive a full picture — research summary, dealbreaker check, scored breakdown, interview process notes, and specific talking points — so you can decide whether to apply without any additional back-and-forth.",
       securitySchemes: [{ type: "noauth" }],
@@ -297,6 +298,7 @@ export const promptTools = [
     name: "tailor_cv",
     definition: {
       name: "tailor_cv",
+      annotations: { title: "Tailor CV", readOnlyHint: true, openWorldHint: false },
       description:
         "Generate a tailored CV for a specific job application, highlighting the most relevant experience and skills.",
       securitySchemes: [{ type: "noauth" }],
@@ -324,6 +326,7 @@ export const promptTools = [
     name: "generate_cover_letter",
     definition: {
       name: "generate_cover_letter",
+      annotations: { title: "Generate cover letter", readOnlyHint: true, openWorldHint: false },
       description: "Generate a tailored cover letter for a job application.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
@@ -356,6 +359,7 @@ export const promptTools = [
     name: "prep_interview",
     definition: {
       name: "prep_interview",
+      annotations: { title: "Prep interview", readOnlyHint: true, openWorldHint: true },
       description:
         "Generate comprehensive interview preparation materials for a company and role, including likely questions, research points, and talking points from your CV. Automatically includes any existing notes from the application doc.",
       securitySchemes: [{ type: "noauth" }],
