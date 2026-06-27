@@ -1,5 +1,7 @@
 {
   "cv_file_path": "/absolute/path/to/your/cv.pdf",
+  "_cv_text_note": "For hosted/remote use you can instead inline your CV as a string in 'cv_text' (below) so no file is needed on disk.",
+  "cv_text": "",
 
   "cv_constants": {
     "name": "Your Name",
@@ -8,6 +10,8 @@
 
   "google_sheets": {
     "spreadsheet_id": "YOUR_GOOGLE_SHEET_ID_HERE",
+    "applications_sheet_gid": 0,
+    "_credentials_note": "Local: set service_account_key_file to a path. Hosted: leave it out and provide the key via the GOOGLE_SERVICE_ACCOUNT_JSON env var instead.",
     "service_account_key_file": "/absolute/path/to/service-account-key.json"
   },
 

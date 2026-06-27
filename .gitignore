@@ -1,10 +1,24 @@
 node_modules/
+
+# Local config & secrets — never commit
 config.json
-*.json.bak
 .env
-.DS_Store
+.env.*
+!.env.example
+*.json.bak
+
+# Service-account keys / credentials (any shape, anywhere)
+*service-account*.json
+*service_account*.json
+*-key.json
+*-credentials*.json
+gcloud-key*.json
+client_secret*.json
+*.pem
+*.p12
 
 # Personal data — each user provides their own
 context/
-*-service-account*.json
-*-key.json
+
+# OS
+.DS_Store

@@ -33,14 +33,29 @@ function extractDocId(url) {
 export class GoogleSheetsClient {
   constructor(config) {
     this.spreadsheetId = config.google_sheets.spreadsheet_id;
-    const auth = new google.auth.GoogleAuth({
-      keyFile: config.google_sheets.service_account_key_file,
+
+    // Credentials come from either an inline service-account object (hosted —
+    // injected via GOOGLE_SERVICE_ACCOUNT_JSON) or a key file path (local).
+    // Never hardcoded; never read from source.
+    const { service_account_json, service_account_key_file } = config.google_sheets;
+    const authOptions = {
       scopes: [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/documents",
         "https://www.googleapis.com/auth/drive",
       ],
-    });
+    };
+    if (service_account_json) {
+      authOptions.credentials = service_account_json;
+    } else if (service_account_key_file) {
+      authOptions.keyFile = service_account_key_file;
+    } else {
+      throw new Error(
+        "No Google credentials configured. Set GOOGLE_SERVICE_ACCOUNT_JSON " +
+          "(hosted) or google_sheets.service_account_key_file in config.json (local)."
+      );
+    }
+    const auth = new google.auth.GoogleAuth(authOptions);
     this.sheets = google.sheets({ version: "v4", auth });
     this.docs = google.docs({ version: "v1", auth });
     this.drive = google.drive({ version: "v3", auth });
