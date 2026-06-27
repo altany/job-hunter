@@ -229,6 +229,38 @@ export class GoogleSheetsClient {
     return `✅ Updated "${args.role_title}" at ${args.company_name}${args.status ? ` → ${args.status}` : ""}${args.rating != null ? ` | ⭐ ${args.rating}/10` : ""}${args.job_url ? ` | 🔗 URL updated` : ""}${args.doc_url ? ` | 📄 Doc linked` : ""}.`;
   }
 
+  async deleteApplication(company, role) {
+    await this.ensureSheets();
+    const { rows, rowIndex } = await this._findRow(company, role);
+
+    if (rowIndex === -1) {
+      return `❌ Could not find application for "${role}" at ${company}. Use get_applications to see existing entries.`;
+    }
+
+    // deleteDimension needs the tab's numeric sheetId; look it up by title.
+    const meta = await this.sheets.spreadsheets.get({ spreadsheetId: this.spreadsheetId });
+    const appsSheet = meta.data.sheets.find((s) => s.properties.title === "Applications");
+    const sheetId = appsSheet?.properties.sheetId ?? 0;
+
+    const deletedCompany = rows[rowIndex][COL.COMPANY];
+    const deletedRole = rows[rowIndex][COL.ROLE];
+
+    await this.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            deleteDimension: {
+              range: { sheetId, dimension: "ROWS", startIndex: rowIndex, endIndex: rowIndex + 1 },
+            },
+          },
+        ],
+      },
+    });
+
+    return `🗑️ Deleted "${deletedRole}" at ${deletedCompany}.`;
+  }
+
   async getApplications(statusFilter) {
     await this.ensureSheets();
     const res = await this.sheets.spreadsheets.values.get({

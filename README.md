@@ -25,6 +25,7 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 | `update_application_doc` | "Add to my Stripe doc: 4 interview stages, take-home first" |
 | `prep_interview` | "Prep me for my Stripe final round interview" |
 | `add_interview_note` | "Log that I passed the Stripe phone screen" |
+| `delete_application` | "Delete the duplicate Grafana entry" — removes a row from the tracker (e.g. a duplicate or mistake) |
 
 ---
 
@@ -479,7 +480,7 @@ Once deployed you have two values:
 4. **Authentication:** if there's an OAuth/token field, paste the token there.
    If there's no token field, use the **token-in-URL** form instead and leave
    auth as none: `https://job-hunter-xxxxx-ew.a.run.app/mcp/<your-token>`.
-5. Save, then **enable** the connector. The 10 job-hunter tools appear in chat.
+5. Save, then **enable** the connector. The job-hunter tools appear in chat.
 
 ### Claude mobile (iOS / Android)
 

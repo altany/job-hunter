@@ -222,4 +222,27 @@ export const trackerTools = [
       };
     },
   },
+  {
+    name: "delete_application",
+    definition: {
+      name: "delete_application",
+      annotations: { title: "Delete application", readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      description:
+        "Permanently delete a job application row from the tracker — use this to remove a duplicate or a wrong entry. Matches by company name + role title and deletes the first match. This cannot be undone, so confirm the company and role before calling.",
+      securitySchemes: [{ type: "noauth" }],
+      _meta: noauth,
+      inputSchema: {
+        type: "object",
+        properties: {
+          company_name: { type: "string" },
+          role_title: { type: "string" },
+        },
+        required: ["company_name", "role_title"],
+      },
+    },
+    handler: async (args, { sheets }) => {
+      const result = await sheets.deleteApplication(args.company_name, args.role_title);
+      return { content: [{ type: "text", text: result }] };
+    },
+  },
 ];
