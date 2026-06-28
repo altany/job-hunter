@@ -25,6 +25,7 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 | `update_application_doc` | "Add to my Stripe doc: 4 interview stages, take-home first" |
 | `prep_interview` | "Prep me for my Stripe final round interview" |
 | `add_interview_note` | "Log that I passed the Stripe phone screen" |
+| `delete_application` | "Delete the duplicate Grafana entry" — removes a row from the tracker (e.g. a duplicate or mistake) |
 
 ---
 
@@ -36,21 +37,31 @@ The architecture is simple:
 User → Claude / ChatGPT → MCP Server → Google APIs
 
 - Claude / ChatGPT: natural language interface
-- MCP Server: exposes tools and prompts
+- MCP Server: exposes tools and prompts (runs locally over **stdio**, or remotely over **HTTP** — see "Running it as a remote server")
 - Google Sheets: application tracker
 - Google Docs: interview notes
 
 The AI never accesses Google services directly — all access goes through the MCP server.
+
+Code layout:
+- [`src/index.js`](src/index.js) — entrypoint; picks stdio or HTTP transport
+- [`src/createServer.js`](src/createServer.js) — builds the MCP server from the tool registry
+- [`src/tools/`](src/tools) — one entry per tool (`{ name, definition, handler }`); **add a tool by dropping in an object here**
+- [`src/sheets.js`](src/sheets.js), [`src/cv.js`](src/cv.js), [`src/config.js`](src/config.js) — Google access, CV loading, config/secret resolution
 
 ---
 
 ## Compatibility
 
 This MCP server now works with:
-- Claude
-- ChatGPT
+- Claude — locally (Claude Desktop, via stdio) **or** remotely as a custom connector (Claude web & mobile, via HTTP)
+- ChatGPT — via its MCP connector (HTTP)
 
 Both clients consume the same MCP tool definitions, allowing the same workflow to run across different AI assistants.
+
+**Two ways to run it:**
+- **Local (stdio)** — simplest; runs on your machine for Claude Desktop. Follow the setup steps below.
+- **Remote (HTTP)** — a public, token-protected URL you can add to the Claude web and mobile apps. See [Running it as a remote server](#running-it-as-a-remote-server-claude-web--mobile).
 
 ---
 
@@ -82,7 +93,7 @@ You should see something like `v20.11.0`. Any version 18+ is fine.
 ## Step 2: Download and install the tool
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/job-hunter.git
+git clone https://github.com/altany/job-hunter.git
 cd job-hunter
 npm install
 ```
@@ -185,9 +196,9 @@ For each job you want to track in detail, create a Google Doc manually and link 
 
 Once linked, you can say things like:
 - *"Show me my Stripe notes"* — returns the full doc content
-- *"Add to my Strip doc: their process is 4 rounds, starting with a take-home"* — appends a new section
+- *"Add to my Stripe doc: their process is 4 rounds, starting with a take-home"* — appends a new section
 
-> **Note:** Automatic doc creation via the tool is not currently supported due to Google Drive API permission limitations with service accounts on personal Drive.
+> **Note:** The doc tools *try* to auto-create a doc when one doesn't exist, but with a service account on a personal Google Drive this fails (Drive permission / storage-quota limitations), so for now create the doc manually and link it as above. Making auto-creation work (e.g. via a Shared Drive or user OAuth) is a welcome contribution - PRs welcome.
 
 ---
 
@@ -275,7 +286,8 @@ Suggested things to include in `candidate_knowledge_base.md`:
 - What you're looking for in your next role
 - STAR stories for common interview questions
 - Things to avoid mentioning / frame carefully
-- Your current pipeline and any active interview stages
+
+(Your live pipeline lives in the tracker Sheet, so there's no need to duplicate it here.)
 
 The `context/` folder is gitignored — it stays on your machine only.
 
@@ -285,7 +297,7 @@ The `context/` folder is gitignored — it stays on your machine only.
 
 ### Claude Desktop
 
-Claude Desktop is the desktop app for Claude. You need a Claude Pro account for MCP support.
+Claude Desktop is the desktop app for Claude.
 
 #### a. Find the config file
 
@@ -342,90 +354,190 @@ Fully quit Claude Desktop (don't just close the window — quit it from the menu
 You should now see the job-hunter tools available in your Claude session — there'll usually be a small indicator showing MCP tools are active.
 
 
-### ChatGPT
-This MCP server was originally built for **Claude**, but it can also be used with **ChatGPT's MCP integration**.
+---
 
-The same MCP tools work across both environments without modification.
+## Running it as a remote server (Claude web & mobile)
+
+The same server can also run over **HTTP** behind a public HTTPS URL, so you can
+add it as a **custom connector** in the Claude web app and the Claude mobile
+apps — no desktop config file required.
+
+The transport is chosen with the `MCP_TRANSPORT` environment variable:
+
+| `MCP_TRANSPORT` | Transport | Use |
+|-----------------|-----------|-----|
+| `stdio` (default) | stdin/stdout | Local desktop apps (the setup above) |
+| `http` | Streamable HTTP | Remote, public server |
+
+Both share the exact same tool logic in [`src/createServer.js`](src/createServer.js).
+
+### Environment variables (HTTP mode)
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `MCP_TRANSPORT=http` | ✅ | Selects the HTTP transport |
+| `MCP_AUTH_TOKEN` | ✅ | Shared secret clients must present (≥16 chars). Generate: `openssl rand -hex 32` |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | ✅ | The service-account key **JSON contents** (not a path) |
+| `JOB_HUNTER_CONFIG_JSON` | ✅ | Your full config as a JSON string — preferences, `google_sheets.spreadsheet_id`, plus inlined `cv_text` and `context_text`. Generate it with `npm run pack-config` (don't build it by hand). |
+| `PORT` | – | Port to listen on (the host usually injects this) |
+
+See [`.env.example`](.env.example) for the shape. **No secret is ever read from
+source** — only from these env vars (hosted) or a gitignored `config.json` (local).
+
+### Generate the config blob (`npm run pack-config`)
+
+Don't assemble `JOB_HUNTER_CONFIG_JSON` by hand. Run:
+
+```bash
+npm run pack-config | pbcopy      # macOS: copies the blob to your clipboard
+# or: npm run pack-config > my-config.blob.json
+```
+
+It reads your local `config.json`, CV file, and `context/*.md`, inlines the CV
+(`cv_text`) and context (`context_text`), strips the local key-file path, and
+prints the single JSON value to set as `JOB_HUNTER_CONFIG_JSON`. Re-run it and
+update the env var whenever your config or context changes. The service-account
+key (`GOOGLE_SERVICE_ACCOUNT_JSON`) and token (`MCP_AUTH_TOKEN`) are set separately.
+
+### Test it locally over HTTP
+
+```bash
+cp .env.example .env          # fill in MCP_AUTH_TOKEN etc.
+npm run start:http            # listens on http://localhost:3001/mcp
+```
+
+Smoke test (should return your tools):
+
+```bash
+curl -s localhost:3001/health        # → {"status":"ok"}
+
+curl -s -X POST localhost:3001/mcp \
+  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"1"}}}'
+```
+
+A request with no / wrong token returns `401 Unauthorized`.
+
+### Authentication
+
+A single shared **bearer token** (`MCP_AUTH_TOKEN`). The same secret is accepted
+two ways so it works with whatever your client supports:
+
+1. `Authorization: Bearer <token>` header, or
+2. a token in the URL path: `https://<host>/mcp/<token>`
+
+This is deliberately simple (single user) — no OAuth. The server refuses to
+start in HTTP mode without a strong token, so it can never come up unauthenticated.
 
 ---
 
-## Exposing the MCP Server
+## Deploy your own
 
-ChatGPT requires the MCP server to be accessible via a **public HTTPS URL**.
+Any host that runs a Node web service works. Two free options:
 
-A simple way to achieve this is by using a **Cloudflare Tunnel**.
+### Option A — Render (no credit card)
 
-### Install Cloudflare Tunnel
+[Render](https://render.com)'s free tier needs no card. Trade-off: the service
+sleeps after ~15 min idle, so the first request after a nap takes ~50s to wake
+(see "Keeping it awake" below).
+
+1. Push your fork to GitHub, then on Render: **New → Web Service** and connect the repo.
+2. **Build command:** `npm ci` · **Start command:** `npm run start:http` (or let Render use the included `Dockerfile`).
+3. **Instance type:** Free · **Health Check Path:** `/health`.
+4. Add environment variables:
+   - `MCP_TRANSPORT` = `http`
+   - `MCP_AUTH_TOKEN` = a strong secret (`openssl rand -hex 32`)
+   - `GOOGLE_SERVICE_ACCOUNT_JSON` = the full contents of your service-account key file
+   - `JOB_HUNTER_CONFIG_JSON` = the output of `npm run pack-config`
+5. Create the service. Your MCP endpoint is the Render URL + `/mcp`.
+
+### Option B — Google Cloud Run
+
+Free at personal volume and scales to zero, but **requires a billing account on
+file (a card)** even for free-tier usage, and secrets live next to it in Secret
+Manager. A `Dockerfile` is included; `--source .` builds it for you.
+
+> Prerequisites: a Google Cloud project (the same one your service account is in)
+> and the [`gcloud` CLI](https://cloud.google.com/sdk/docs/install) installed and
+> logged in (`gcloud auth login`).
 
 ```bash
-brew install cloudflared
+# 0. Pick your project and region
+gcloud config set project YOUR_PROJECT_ID
+gcloud config set run/region europe-west1
+
+# 1. Enable the services
+gcloud services enable run.googleapis.com secretmanager.googleapis.com cloudbuild.googleapis.com
+
+# 2. Store the three secrets (paste/​pipe the real values)
+gcloud secrets create mcp-auth-token --data-file=- <<< "$(openssl rand -hex 32)"
+gcloud secrets create google-sa-json --data-file=/path/to/service-account.json
+gcloud secrets create job-hunter-config --data-file=/path/to/your-config.json
 ```
 
-Login to your Cloudflare account:
+`job-hunter-config` is the output of `npm run pack-config` (your config + CV + context, inlined, with the local key-file path stripped). The key itself comes from its own secret.
+
 ```bash
-cloudflared tunnel login
+# 3. Deploy (builds the container from source, wires secrets to env vars)
+gcloud run deploy job-hunter \
+  --source . \
+  --allow-unauthenticated \
+  --set-env-vars MCP_TRANSPORT=http \
+  --set-secrets MCP_AUTH_TOKEN=mcp-auth-token:latest \
+  --set-secrets GOOGLE_SERVICE_ACCOUNT_JSON=google-sa-json:latest \
+  --set-secrets JOB_HUNTER_CONFIG_JSON=job-hunter-config:latest
 ```
 
-Create a tunnel:
-```bash
-cloudflared tunnel create job-hunter
-```
+`--allow-unauthenticated` means *Cloud Run* won't add its own IAM layer — your
+own `MCP_AUTH_TOKEN` is what protects the endpoint. The command prints a
+**Service URL** like `https://job-hunter-xxxxx-ew.a.run.app`; your MCP endpoint
+is that URL + `/mcp`.
 
-#### Create Tunnel Configuration
+To read the token back later: `gcloud secrets versions access latest --secret=mcp-auth-token`.
 
-Create the file:
-```
-~/.cloudflared/config.yml
-```
+To update after code changes: re-run the `gcloud run deploy` command.
 
-Example configuration:
-```yaml
-tunnel: job-hunter
-credentials-file: ~/.cloudflared/job-hunter.json
+### Keeping it awake (free tiers that sleep)
 
-ingress:
-  - hostname: jobhunter.yourdomain.com
-    service: http://localhost:3001
-  - service: http_status:404
-```
+Free hosts spin down when idle, so the first request after a gap is slow. To avoid that, set up a free scheduled ping (e.g. [cron-job.org](https://cron-job.org) or [UptimeRobot](https://uptimerobot.com)) that hits `https://<your-host>/health` every few minutes.
 
-Create the DNS route:
-```bash
-cloudflared tunnel route dns job-hunter jobhunter.yourdomain.com
-```
+---
 
-Start the tunnel:
-```bash
-cloudflared tunnel run job-hunter
-```
+## Connect from Claude (custom connector)
 
-#### Running the MCP Server
+Once deployed you have two values:
 
-Start the MCP server locally:
-```bash
-node src/chatgpt.js
-```
+- **Remote MCP server URL:** your host's URL + `/mcp` (e.g. `https://<your-host>/mcp`)
+- **Auth token:** the `MCP_AUTH_TOKEN` value
 
-Or run both the server and the tunnel together:
-```bash
-npm run chatgpt
-```
-Example script in `package.json`:
-```json
-"chatgpt": "concurrently \"node src/chatgpt.js\" \"cloudflared tunnel run job-hunter\""
-```
+### Claude web / desktop
 
-#### Connecting ChatGPT to the MCP Server
+1. **Settings → Connectors → Add custom connector**.
+2. **Name:** `job-hunter`.
+3. **Remote MCP server URL:** your `…/mcp` URL.
+4. **Authentication:** if there's an OAuth/token field, paste the token there.
+   If there's no token field, use the **token-in-URL** form instead and leave
+   auth as none: `https://<your-host>/mcp/<your-token>`.
+5. Save, then **enable** the connector. The job-hunter tools appear in chat.
 
-In ChatGPT:
+### Claude mobile (iOS / Android)
 
-1. Open Developer Mode
-2. Add a new MCP Server
-3. Enter the server URL: `https://jobhunter.yourdomain.com/mcp`
-4. Authentication: `No authentication`
+Same connector syncs to mobile once added on web. If adding directly on mobile:
+**Settings → Connectors → Add custom connector**, paste the same URL (or the
+token-in-URL form), save, enable.
 
-Once connected, ChatGPT will automatically discover all tools exposed by the MCP server.
-Keep Developer mode enabled while using the tool.
+> Heads up: the token-in-URL form is convenient but the token can appear in
+> server/proxy logs. Prefer the `Authorization: Bearer` header field if your
+> client exposes one; rotate the token (redeploy `mcp-auth-token`) if it leaks.
+
+### ChatGPT
+
+The same HTTP server works with ChatGPT's MCP/Developer-mode connector — add the
+same URL. (It previously used a Cloudflare tunnel; a deployed remote URL works
+the same way and is authenticated.)
+
 ---
 
 ## Testing it works
@@ -526,14 +638,16 @@ node scripts/format-sheet-status.js
 - Sorts rows by status priority: **Offer → Interview → Applied → Phone Screen → Saved → Rejected → Withdrawn**
 - Secondary sort: Rating descending within each group
 
-**Things to check before running for the first time:**
+**Config before running for the first time:**
 
-| Constant | Location in script | What to set |
-|---|---|---|
-| `SPREADSHEET_ID` | Top of file | Your spreadsheet ID (from the URL) |
-| `SHEET_ID` | Top of file | The numeric ID of your Applications tab — find it in the URL after `gid=` when you have that tab open |
-| `STATUS_COL_INDEX` | Top of file | 0-based column index of your Status column (e.g. `8` = column I) |
-| `RATING_COL_INDEX` | Top of file | 0-based column index of your Rating column (e.g. `7` = column H) |
+The script reads your spreadsheet from `config.json` (or the `JOB_HUNTER_CONFIG_JSON` / `SPREADSHEET_ID` env vars) — nothing is hardcoded. Make sure these are set:
+
+| Config field | What to set |
+|---|---|
+| `google_sheets.spreadsheet_id` | Your spreadsheet ID (from the URL) |
+| `google_sheets.applications_sheet_gid` | The numeric ID of your Applications tab — in the URL after `gid=` when that tab is open (defaults to `0`) |
+
+Column positions for the Status/Rating styling are constants at the top of the script (`STATUS_COL_INDEX`, `RATING_COL_INDEX`).
 
 > **Column index reference:** A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, J=9 ...
 
@@ -559,19 +673,48 @@ const STATUS_COLOURS = {
 ```
 job-hunter/
 ├── src/
-│   ├── index.js          # MCP server + all tool definitions and prompts
+│   ├── index.js          # Entrypoint — selects stdio or HTTP transport
+│   ├── createServer.js   # Builds the MCP server from the tool registry
+│   ├── http.js           # Remote Streamable HTTP transport (+ auth, /health)
+│   ├── auth.js           # Bearer-token middleware (HTTP mode)
+│   ├── config.js         # Config + secret resolution (env or config.json)
 │   ├── sheets.js         # Google Sheets + Docs read/write
-│   └── cv.js             # CV loading (PDF, DOCX, MD, TXT, TS, JSON)
+│   ├── cv.js             # CV loading (PDF, DOCX, MD, TXT, TS, JSON)
+│   └── tools/
+│       ├── index.js      # Tool registry — add new tools here
+│       ├── prompts.js    # rate_job, tailor_cv, generate_cover_letter, prep_interview
+│       └── tracker.js    # add/update/get applications + docs + notes
 ├── scripts/
 │   ├── format-doc-headings.js    # Convert ASCII headings to Google Doc styles
-│   └── format-sheet-status.js   # Style and sort the Applications sheet
+│   └── format-sheet-status.js    # Style and sort the Applications sheet
 ├── context/              # Your personal context files (gitignored)
 │   └── candidate_knowledge_base.md
-├── config.json           # Your config (gitignored)
+├── Dockerfile            # For Cloud Run / any container host
+├── .env.example          # Env vars for HTTP mode
+├── config.json           # Your config + local secrets (gitignored)
 ├── config.example.json   # Template
 ├── package.json
 └── README.md
 ```
+
+### Adding your own tool
+
+Tools live in [`src/tools/`](src/tools). Add one by appending an object to an
+existing file (or a new file imported from `src/tools/index.js`):
+
+```js
+{
+  name: "my_tool",
+  definition: { name: "my_tool", description: "...", inputSchema: { /* ... */ } },
+  handler: async (args, { config, sheets, cvText, preferences, contextFiles }) => ({
+    content: [{ type: "text", text: "result" }],
+  }),
+}
+```
+
+Rules and extra context are loaded automatically from your `preferences` (in
+config) and the `context/*.md` files, so you can grow the guidance without
+touching any tool code.
 
 ---
 
@@ -583,9 +726,15 @@ job-hunter/
 | `config.example.json` | ✅ | Template — no real values |
 | `README.md` | ✅ | |
 | `package.json` | ✅ | |
+| `Dockerfile` / `.env.example` | ✅ | Deploy config — no real values |
 | `config.json` | ❌ | Your credentials and preferences |
+| `.env` | ❌ | Your local env vars / token |
 | `context/` | ❌ | Your personal data |
-| `*-service-account*.json` | ❌ | Google credentials |
+| `*-service-account*.json` / `*-key.json` | ❌ | Google credentials |
+
+> The included [`.gitignore`](.gitignore) already excludes all of the ❌ rows.
+> Before making the repo public, double-check with `git status` that no
+> `config.json`, `.env`, or service-account JSON is staged.
 
 ---
 

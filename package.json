@@ -4,10 +4,15 @@
   "description": "MCP server for job hunting — rating, applications, interview tracking",
   "type": "module",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node src/index.js",
+    "start:http": "MCP_TRANSPORT=http node src/index.js",
     "dev": "node --watch src/index.js",
-   "chatgpt": "concurrently \"node src/chatgpt.js\" \"cloudflared tunnel run job-hunter\""
+    "dev:http": "MCP_TRANSPORT=http node --watch src/index.js",
+    "pack-config": "node scripts/pack-config.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
@@ -16,8 +21,5 @@
     "googleapis": "^140.0.0",
     "mammoth": "^1.7.0",
     "pdf-parse": "^1.1.1"
-  },
-  "devDependencies": {
-    "concurrently": "^9.2.1"
   }
 }

@@ -2,9 +2,15 @@ import fs from "fs";
 import path from "path";
 
 export async function loadCV(config) {
+  // Hosted deploys can supply the CV inline (config.cv_text) so no file is
+  // needed on disk. Local stdio use keeps reading from cv_file_path.
+  if (config.cv_text && config.cv_text.trim()) {
+    return { cvText: config.cv_text };
+  }
+
   const cvPath = config.cv_file_path;
 
-  if (!fs.existsSync(cvPath)) {
+  if (!cvPath || !fs.existsSync(cvPath)) {
     throw new Error(`CV file not found at: ${cvPath}. Please set cv_file_path in config.json.`);
   }
 

@@ -1,0 +1,17 @@
+node_modules
+.git
+.gitignore
+.env
+.env.*
+config.json
+context
+*.json.bak
+*service-account*.json
+*service_account*.json
+*-key.json
+*-credentials*.json
+*.pem
+*.p12
+README.md
+.DS_Store
+npm-debug.log

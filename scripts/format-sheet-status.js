@@ -14,19 +14,22 @@
  */
 
 import { google } from "googleapis";
-import { readFileSync } from "fs";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
+import { loadConfig } from "../src/config.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const configPath = resolve(__dirname, "../config.json");
-const config = JSON.parse(readFileSync(configPath, "utf8"));
+const config = loadConfig();
 
-const SPREADSHEET_ID = "YOUR_SPREADSHEET_ID";
-const SHEET_ID = 0;
+const SPREADSHEET_ID = config.google_sheets.spreadsheet_id;
+const SHEET_ID = config.google_sheets.applications_sheet_gid ?? 0;
 
+if (!SPREADSHEET_ID) {
+  throw new Error("google_sheets.spreadsheet_id is not set in config.json / env.");
+}
+
+const { service_account_json, service_account_key_file } = config.google_sheets;
 const auth = new google.auth.GoogleAuth({
-  keyFile: config.google_sheets.service_account_key_file,
+  ...(service_account_json
+    ? { credentials: service_account_json }
+    : { keyFile: service_account_key_file }),
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 

@@ -33,14 +33,29 @@ function extractDocId(url) {
 export class GoogleSheetsClient {
   constructor(config) {
     this.spreadsheetId = config.google_sheets.spreadsheet_id;
-    const auth = new google.auth.GoogleAuth({
-      keyFile: config.google_sheets.service_account_key_file,
+
+    // Credentials come from either an inline service-account object (hosted —
+    // injected via GOOGLE_SERVICE_ACCOUNT_JSON) or a key file path (local).
+    // Never hardcoded; never read from source.
+    const { service_account_json, service_account_key_file } = config.google_sheets;
+    const authOptions = {
       scopes: [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/documents",
         "https://www.googleapis.com/auth/drive",
       ],
-    });
+    };
+    if (service_account_json) {
+      authOptions.credentials = service_account_json;
+    } else if (service_account_key_file) {
+      authOptions.keyFile = service_account_key_file;
+    } else {
+      throw new Error(
+        "No Google credentials configured. Set GOOGLE_SERVICE_ACCOUNT_JSON " +
+          "(hosted) or google_sheets.service_account_key_file in config.json (local)."
+      );
+    }
+    const auth = new google.auth.GoogleAuth(authOptions);
     this.sheets = google.sheets({ version: "v4", auth });
     this.docs = google.docs({ version: "v1", auth });
     this.drive = google.drive({ version: "v3", auth });
@@ -212,6 +227,38 @@ export class GoogleSheetsClient {
     }
 
     return `✅ Updated "${args.role_title}" at ${args.company_name}${args.status ? ` → ${args.status}` : ""}${args.rating != null ? ` | ⭐ ${args.rating}/10` : ""}${args.job_url ? ` | 🔗 URL updated` : ""}${args.doc_url ? ` | 📄 Doc linked` : ""}.`;
+  }
+
+  async deleteApplication(company, role) {
+    await this.ensureSheets();
+    const { rows, rowIndex } = await this._findRow(company, role);
+
+    if (rowIndex === -1) {
+      return `❌ Could not find application for "${role}" at ${company}. Use get_applications to see existing entries.`;
+    }
+
+    // deleteDimension needs the tab's numeric sheetId; look it up by title.
+    const meta = await this.sheets.spreadsheets.get({ spreadsheetId: this.spreadsheetId });
+    const appsSheet = meta.data.sheets.find((s) => s.properties.title === "Applications");
+    const sheetId = appsSheet?.properties.sheetId ?? 0;
+
+    const deletedCompany = rows[rowIndex][COL.COMPANY];
+    const deletedRole = rows[rowIndex][COL.ROLE];
+
+    await this.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            deleteDimension: {
+              range: { sheetId, dimension: "ROWS", startIndex: rowIndex, endIndex: rowIndex + 1 },
+            },
+          },
+        ],
+      },
+    });
+
+    return `🗑️ Deleted "${deletedRole}" at ${deletedCompany}.`;
   }
 
   async getApplications(statusFilter) {
