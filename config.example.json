@@ -2,6 +2,7 @@
   "cv_file_path": "/absolute/path/to/your/cv.pdf",
   "_cv_text_note": "For hosted/remote use you can instead inline your CV as a string in 'cv_text' (below) so no file is needed on disk.",
   "cv_text": "",
+  "_context_note": "Rich freeform context lives in context/*.md (read from disk locally). For hosted use, `npm run pack-config` inlines it here as 'context_text' automatically — you don't edit this by hand.",
 
   "cv_constants": {
     "name": "Your Name",

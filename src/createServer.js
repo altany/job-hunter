@@ -13,7 +13,14 @@ import { tools, toolsByName } from "./tools/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function loadContextFiles() {
+export function loadContextFiles(config = {}) {
+  // Hosted deploys supply the context inline (config.context_text) since the
+  // gitignored context/ folder isn't shipped to the server. Local stdio use
+  // keeps reading context/*.md from disk.
+  if (config.context_text && config.context_text.trim()) {
+    return config.context_text;
+  }
+
   const contextDir = path.join(__dirname, "../context");
   if (!fs.existsSync(contextDir)) return "";
 
@@ -47,7 +54,7 @@ export function createServer() {
     const sheets = new GoogleSheetsClient(config);
     const { cvText } = await loadCV(config);
     const preferences = loadPreferences(config);
-    const contextFiles = loadContextFiles();
+    const contextFiles = loadContextFiles(config);
 
     const { name, arguments: args } = request.params;
     const tool = toolsByName[name];
