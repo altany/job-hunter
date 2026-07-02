@@ -16,7 +16,7 @@ export const trackerTools = [
     definition: {
       name: "add_application",
       annotations: { title: "Add application", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-      description: "Log a new job application to your Google Sheets tracker.",
+      description: "Log a NEW job application (a company + role not already in the tracker) to Google Sheets. If the application already exists, use update_application instead — calling this again creates a duplicate row.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -50,7 +50,7 @@ export const trackerTools = [
     definition: {
       name: "update_application",
       annotations: { title: "Update application", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-      description: "Update an existing application's status, add interview notes, or record outcomes.",
+      description: "Update ANY field of an application that already exists in the tracker: status, rating, notes (appended), next step, salary, work type, location, or a linked doc URL. Use this — not add_application — to change something for a company that's already tracked (e.g. just the rating). Matched leniently by company + role.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -104,9 +104,9 @@ export const trackerTools = [
     name: "get_application_doc",
     definition: {
       name: "get_application_doc",
-      annotations: { title: "Get/create application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: { title: "Get application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
-        "Get the Google Doc for a specific application. If no doc exists yet, creates one automatically and links it to the tracker. Returns the doc URL and full current content.",
+        "Get the Google Doc linked to an application and return its full contents. Docs are NOT created automatically — if the user gives a doc link, pass it as doc_url to link it and read it. If none is linked and no doc_url is given, ask the user for the Google Doc URL.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -114,37 +114,42 @@ export const trackerTools = [
         properties: {
           company_name: { type: "string" },
           role_title: { type: "string" },
+          doc_url: { type: "string", description: "Google Doc URL to link to this application and read (optional; the doc must be shared with the service account as Editor)." },
         },
         required: ["company_name", "role_title"],
       },
     },
     handler: async (args, { sheets }) => {
-      let docUrl, created = false;
-
-      try { docUrl = await sheets.getDocUrl(args.company_name, args.role_title); }
-      catch (e) { throw new Error(`getDocUrl failed: ${e.message}`); }
-
-      if (!docUrl) {
-        let newUrl;
-        try { ({ docUrl: newUrl } = await sheets.createApplicationDoc(args.company_name, args.role_title)); }
-        catch (e) { throw new Error(`createApplicationDoc failed: ${e.message}`); }
-        docUrl = newUrl;
+      let docUrl;
+      if (args.doc_url) {
+        docUrl = args.doc_url;
         try {
           await sheets.updateApplication({
             company_name: args.company_name,
             role_title: args.role_title,
             doc_url: docUrl,
           });
-        } catch (e) { throw new Error(`updateApplication failed: ${e.message}`); }
-        created = true;
+        } catch (e) { /* linking is best-effort; still try to read below */ }
+      } else {
+        try { docUrl = await sheets.getDocUrl(args.company_name, args.role_title); }
+        catch (e) { throw new Error(`getDocUrl failed: ${e.message}`); }
+      }
+
+      if (!docUrl) {
+        return {
+          content: [{
+            type: "text",
+            text: `No Google Doc is linked to "${args.role_title}" at ${args.company_name} yet. Create one in Google Drive, share it with the service account as Editor, then give me the link and I'll link it (pass it as doc_url). Docs aren't created automatically.`,
+          }],
+        };
       }
 
       let docContent = "";
       try { docContent = await sheets.readDoc(docUrl); }
-      catch (e) { docContent = "(could not read doc content: " + e.message + ")"; }
+      catch (e) { docContent = `(couldn't read the doc — check it's shared with the service account as Editor: ${e.message})`; }
 
-      const header = created
-        ? `📄 Created new interview doc for ${args.company_name}:\n${docUrl}`
+      const header = args.doc_url
+        ? `📄 Linked and opened the interview doc for ${args.company_name}:\n${docUrl}`
         : `📄 Interview doc for ${args.company_name}:\n${docUrl}`;
 
       return { content: [{ type: "text", text: `${header}\n\n---\n${docContent}` }] };
@@ -156,7 +161,7 @@ export const trackerTools = [
       name: "update_application_doc",
       annotations: { title: "Update application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description:
-        "Add a new section to the Google Doc for a specific application. Use this to document interview stages, study notes, post-interview reflections, company research, or any other notes. The doc is created automatically if it doesn't exist yet.",
+        "Append a section (heading + content) to the Google Doc linked to an application — interview stages, study notes, reflections, company research, etc. The doc must already exist (the user creates it in Google Drive and shares it with the service account); it is NOT created automatically. Pass the doc URL as doc_url to link it, or link it first with update_application.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -170,25 +175,43 @@ export const trackerTools = [
               "Section heading, e.g. 'Round 1 Reflection', 'Study Notes', 'Interview Process', 'Company Research'",
           },
           content: { type: "string", description: "The content to add under this heading" },
+          doc_url: { type: "string", description: "Google Doc URL to link to this application before appending (optional; the doc must be shared with the service account as Editor)." },
         },
         required: ["company_name", "role_title", "heading", "content"],
       },
     },
     handler: async (args, { sheets }) => {
-      let docUrl = await sheets.getDocUrl(args.company_name, args.role_title);
-
-      if (!docUrl) {
-        const { docUrl: newUrl } = await sheets.createApplicationDoc(args.company_name, args.role_title);
-        docUrl = newUrl;
-        await sheets.updateApplication({
-          company_name: args.company_name,
-          role_title: args.role_title,
-          doc_url: docUrl,
-        });
+      let docUrl = args.doc_url || null;
+      if (docUrl) {
+        try {
+          await sheets.updateApplication({
+            company_name: args.company_name,
+            role_title: args.role_title,
+            doc_url: docUrl,
+          });
+        } catch (e) { /* linking is best-effort; still try to append below */ }
+      } else {
+        docUrl = await sheets.getDocUrl(args.company_name, args.role_title);
       }
 
-      const result = await sheets.appendToDoc(docUrl, args.heading, args.content);
-      return { content: [{ type: "text", text: `${result}\n📄 ${docUrl}` }] };
+      if (!docUrl) {
+        return {
+          content: [{
+            type: "text",
+            text: `No Google Doc is linked to "${args.role_title}" at ${args.company_name}. Create one in Google Drive, share it with the service account as Editor, then give me the link (pass it as doc_url) and I'll link it and add your notes. Docs aren't created automatically.`,
+          }],
+        };
+      }
+
+      try {
+        const result = await sheets.appendToDoc(docUrl, args.heading, args.content);
+        return { content: [{ type: "text", text: `${result}\n📄 ${docUrl}` }] };
+      } catch (e) {
+        return {
+          content: [{ type: "text", text: `Couldn't write to the doc (${e.message}). Make sure it's shared with the service account as Editor.` }],
+          isError: true,
+        };
+      }
     },
   },
   {

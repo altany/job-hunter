@@ -113,12 +113,28 @@ export class GoogleSheetsClient {
       range: "Applications!A:N",
     });
     const rows = res.data.values || [];
-    const rowIndex = rows.findIndex(
-      (r) =>
-        r[COL.COMPANY]?.toLowerCase().includes(company.toLowerCase()) &&
-        r[COL.ROLE]?.toLowerCase().includes(role.toLowerCase())
+
+    const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const nc = norm(company);
+    const nr = norm(role);
+    if (!nc) return { rows, rowIndex: -1 };
+    const overlaps = (a, b) => a && b && (a.includes(b) || b.includes(a));
+
+    // 1. Company + role both overlap (tolerates minor wording differences).
+    let rowIndex = rows.findIndex(
+      (r, i) => i > 0 && overlaps(norm(r[COL.COMPANY]), nc) && overlaps(norm(r[COL.ROLE]), nr)
     );
-    return { rows, rowIndex };
+    if (rowIndex !== -1) return { rows, rowIndex };
+
+    // 2. Fall back to company alone when it's unambiguous — the role is often
+    //    worded differently by the caller. Only if exactly one row matches.
+    const companyRows = [];
+    rows.forEach((r, i) => {
+      if (i > 0 && overlaps(norm(r[COL.COMPANY]), nc)) companyRows.push(i);
+    });
+    if (companyRows.length === 1) return { rows, rowIndex: companyRows[0] };
+
+    return { rows, rowIndex: -1 };
   }
 
   // ─── Applications ──────────────────────────────────────────────────────────
