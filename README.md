@@ -9,6 +9,8 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 - *"Show me my Stripe notes"* → opens a Google Doc for that application
 - *"Prep me for my Linear interview — it's a behavioural round"* → full prep pack
 
+> 📖 The story behind this, on my blog: [Part 1 - building it](https://tany4.com/blog/posts/building-a-job-hunting-mcp-server) · [Part 2 - going remote](https://tany4.com/blog/posts/taking-my-job-hunting-mcp-server-remote) · [Part 3 - teaching the agent what it can do](https://tany4.com/blog/posts/teaching-my-job-hunting-mcp-server-what-it-can-do)
+
 ---
 
 ## What it does
