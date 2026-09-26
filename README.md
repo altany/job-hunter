@@ -205,13 +205,14 @@ Once linked (either way):
 A service account can't create Docs (it has no Drive storage quota), so auto-create acts as *you* via OAuth. Docs end up in your own Drive, owned by you.
 
 1. [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services → Credentials → + Create Credentials → OAuth client ID** → application type **Desktop app** → Create. Copy the **client ID** and **client secret**.
-2. On the **OAuth consent screen** (External): add yourself as a user. To stop the refresh token expiring after 7 days, **Publish** the app (Production). You'll get an "unverified app" warning when you authorise — expected for a personal app; proceed.
-3. Put the client id/secret into `config.json` under `google_oauth` (see `config.example.json`).
-4. Run the one-time flow — it prints a **refresh token**:
+   Download the client's JSON and save it in the repo root (it's named `client_secret_….json` and is gitignored).
+2. **Google Auth Platform → Branding:** fill in app name, support email, the home page / privacy policy / terms links and developer contact email, then Save. Then **Audience** (user type External) → **Publish app**. Publishing stops the refresh token expiring after 7 days; the Publish button stays disabled until Branding is complete. You'll get an "unverified app" warning when you authorise — expected for a personal app; proceed.
+3. Run the one-time flow:
    ```bash
    npm run auth
    ```
-   Put the refresh token in `config.json` under `google_oauth.refresh_token` (local), and inside the `GOOGLE_OAUTH_JSON` env var on your host (Render) for remote.
+   Open the URL it prints and authorise with your Google account. It saves `client_id`, `client_secret` and `refresh_token` under `google_oauth` in your `config.json` (gitignored).
+4. For the remote server, re-run `npm run pack-config | pbcopy` and update `JOB_HUNTER_CONFIG_JSON` on your host (it now includes `google_oauth`). Alternatively set `GOOGLE_OAUTH_JSON` separately.
 5. Optional: set `google_sheets.docs_folder_id` to a Drive folder for new docs (otherwise they go to a folder named "Job Hunter MCP" if it exists, else your Drive root).
 
 Without this, everything else still works — you just link docs manually as above.
@@ -702,7 +703,9 @@ job-hunter/
 │       └── tracker.js    # add/update/get applications + docs + notes
 ├── scripts/
 │   ├── format-doc-headings.js    # Convert ASCII headings to Google Doc styles
-│   └── format-sheet-status.js    # Style and sort the Applications sheet
+│   ├── format-sheet-status.js    # Style and sort the Applications sheet
+│   ├── pack-config.js            # Bundle config + CV + context for the host (npm run pack-config)
+│   └── oauth-setup.js            # One-time OAuth flow for auto-creating Docs (npm run auth)
 ├── context/              # Your personal context files (gitignored)
 │   └── candidate_knowledge_base.md
 ├── Dockerfile            # For Cloud Run / any container host
@@ -747,6 +750,7 @@ touching any tool code.
 | `.env` | ❌ | Your local env vars / token |
 | `context/` | ❌ | Your personal data |
 | `*-service-account*.json` / `*-key.json` | ❌ | Google credentials |
+| `client_secret_*.json` | ❌ | OAuth client (for auto-creating Docs) |
 
 > The included [`.gitignore`](.gitignore) already excludes all of the ❌ rows.
 > Before making the repo public, double-check with `git status` that no
@@ -756,8 +760,9 @@ touching any tool code.
 
 ## Privacy
 
-Your CV and preferences stay entirely on your machine. The only external services used are:
-- **Google Sheets / Docs API** — reads and writes to *your own* spreadsheet and documents
-- **Claude** — the AI that generates ratings, cover letters, prep materials etc.
+Running locally, your CV, preferences and context stay on your machine. Running remotely, they live in your host's environment variables (e.g. Render), not in the repo. The services involved are:
+- **Google Sheets / Docs / Drive API** — reads and writes *your own* spreadsheet and documents
+- **Claude or ChatGPT** — the assistant that calls the tools and generates ratings, cover letters, prep materials etc.
+- **Your host** (remote only) — runs the server and stores its secrets
 
-Nothing is sent to any third-party service.
+Nothing else is sent anywhere.
