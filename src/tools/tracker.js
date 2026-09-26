@@ -106,7 +106,7 @@ export const trackerTools = [
       name: "get_application_doc",
       annotations: { title: "Get application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
-        "Get the Google Doc linked to an application and return its full contents. Docs are NOT created automatically — if the user gives a doc link, pass it as doc_url to link it and read it. If none is linked and no doc_url is given, ask the user for the Google Doc URL.",
+        "Get the Google Doc linked to an application and return its full contents. If the user gives a doc link, pass it as doc_url to link and read it. If none is linked, use create_application_doc to make one, or ask the user for a doc URL.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -139,7 +139,7 @@ export const trackerTools = [
         return {
           content: [{
             type: "text",
-            text: `No Google Doc is linked to "${args.role_title}" at ${args.company_name} yet. Create one in Google Drive, share it with the service account as Editor, then give me the link and I'll link it (pass it as doc_url). Docs aren't created automatically.`,
+            text: `No Google Doc is linked to "${args.role_title}" at ${args.company_name} yet. I can create one with create_application_doc, or you can paste an existing doc's link (doc_url).`,
           }],
         };
       }
@@ -161,7 +161,7 @@ export const trackerTools = [
       name: "update_application_doc",
       annotations: { title: "Update application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description:
-        "Append a section (heading + content) to the Google Doc linked to an application — interview stages, study notes, reflections, company research, etc. The doc must already exist (the user creates it in Google Drive and shares it with the service account); it is NOT created automatically. Pass the doc URL as doc_url to link it, or link it first with update_application.",
+        "Append a section (heading + content) to the Google Doc linked to an application — interview stages, study notes, reflections, company research, etc. If no doc is linked yet, one is created automatically (owned by you) and linked, then the section is appended. You can also pass an existing doc's URL as doc_url to link it first.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -194,21 +194,98 @@ export const trackerTools = [
         docUrl = await sheets.getDocUrl(args.company_name, args.role_title);
       }
 
+      // Auto-create a doc if none is linked (dedup-safe: we checked getDocUrl above).
+      let created = false;
       if (!docUrl) {
-        return {
-          content: [{
-            type: "text",
-            text: `No Google Doc is linked to "${args.role_title}" at ${args.company_name}. Create one in Google Drive, share it with the service account as Editor, then give me the link (pass it as doc_url) and I'll link it and add your notes. Docs aren't created automatically.`,
-          }],
-        };
+        if (!(await sheets.applicationExists(args.company_name, args.role_title))) {
+          return {
+            content: [{
+              type: "text",
+              text: `I can't find "${args.role_title}" at ${args.company_name} in your tracker. Add it first with add_application, then I'll create its doc and add your notes.`,
+            }],
+          };
+        }
+        try {
+          const { docUrl: newUrl } = await sheets.createApplicationDoc(args.company_name, args.role_title);
+          docUrl = newUrl;
+          await sheets.updateApplication({
+            company_name: args.company_name,
+            role_title: args.role_title,
+            doc_url: docUrl,
+          });
+          created = true;
+        } catch (e) {
+          return {
+            content: [{ type: "text", text: `No doc is linked and I couldn't create one: ${e.message}` }],
+            isError: true,
+          };
+        }
       }
 
       try {
         const result = await sheets.appendToDoc(docUrl, args.heading, args.content);
-        return { content: [{ type: "text", text: `${result}\n📄 ${docUrl}` }] };
+        const prefix = created ? `📄 Created a new doc for ${args.company_name} and linked it.\n` : "";
+        return { content: [{ type: "text", text: `${prefix}${result}\n📄 ${docUrl}` }] };
       } catch (e) {
         return {
           content: [{ type: "text", text: `Couldn't write to the doc (${e.message}). Make sure it's shared with the service account as Editor.` }],
+          isError: true,
+        };
+      }
+    },
+  },
+  {
+    name: "create_application_doc",
+    definition: {
+      name: "create_application_doc",
+      annotations: { title: "Create application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      description:
+        "Create a new Google Doc for an application (titled after the company + role), write any initial content into it, link it to the tracker row, and return the URL. The doc is created in your own Google Drive (owned by you) and shared with the service account. If a doc is already linked to this application, it returns that one instead of creating a duplicate.",
+      securitySchemes: [{ type: "noauth" }],
+      _meta: noauth,
+      inputSchema: {
+        type: "object",
+        properties: {
+          company_name: { type: "string" },
+          role_title: { type: "string" },
+          initial_content: {
+            type: "string",
+            description: "Optional starter content for the doc. If omitted, a structured interview-notes template is used.",
+          },
+        },
+        required: ["company_name", "role_title"],
+      },
+    },
+    handler: async (args, { sheets }) => {
+      // Dedup: never create a second doc if one is already linked.
+      const existing = await sheets.getDocUrl(args.company_name, args.role_title);
+      if (existing) {
+        return {
+          content: [{ type: "text", text: `📄 A doc is already linked for ${args.company_name} — using it, not creating a duplicate:\n${existing}` }],
+        };
+      }
+      if (!(await sheets.applicationExists(args.company_name, args.role_title))) {
+        return {
+          content: [{ type: "text", text: `I can't find "${args.role_title}" at ${args.company_name} in your tracker. Add it first with add_application, then I'll create and link its doc.` }],
+        };
+      }
+      try {
+        const { docUrl } = await sheets.createApplicationDoc(
+          args.company_name,
+          args.role_title,
+          args.initial_content
+        );
+        await sheets.updateApplication({
+          company_name: args.company_name,
+          role_title: args.role_title,
+          doc_url: docUrl,
+        });
+        return {
+          content: [{ type: "text", text: `📄 Created a new doc for ${args.company_name} and linked it to your tracker:\n${docUrl}` }],
+        };
+      } catch (e) {
+        return {
+          content: [{ type: "text", text: `Couldn't create the doc: ${e.message}` }],
           isError: true,
         };
       }

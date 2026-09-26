@@ -55,6 +55,17 @@ export function loadConfig() {
   if (process.env.CV_FILE_PATH) {
     config.cv_file_path = process.env.CV_FILE_PATH;
   }
+  // OAuth user credentials (optional) — only needed to auto-create Google Docs.
+  if (process.env.GOOGLE_OAUTH_JSON) {
+    try {
+      config.google_oauth = JSON.parse(process.env.GOOGLE_OAUTH_JSON);
+    } catch (e) {
+      throw new Error(`GOOGLE_OAUTH_JSON is not valid JSON: ${e.message}`);
+    }
+  }
+  if (process.env.DOCS_FOLDER_ID) {
+    config.google_sheets.docs_folder_id = process.env.DOCS_FOLDER_ID;
+  }
 
   return config;
 }

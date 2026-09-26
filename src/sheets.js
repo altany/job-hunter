@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import fs from "fs";
 
 // Column index map (0-based) for Applications sheet
 // A=0  B=1       C=2     D=3    E=4       F=5         G=6        H=7      I=8      J=9           K=10        L=11    M=12          N=13
@@ -30,6 +31,31 @@ function extractDocId(url) {
   return match ? match[1] : null;
 }
 
+// Structured starter content for a new application doc.
+function DEFAULT_DOC_TEMPLATE(company, role) {
+  const bar = "━".repeat(38);
+  return [
+    `${company} — ${role}`,
+    "Interview Process & Notes",
+    "",
+    bar, "ROLE OVERVIEW", bar,
+    "Paste job ad summary, key requirements, and your initial take here.",
+    "",
+    bar, "INTERVIEW STAGES", bar,
+    "Document each stage: what to expect, who you'll meet, what they assess.",
+    "",
+    bar, "STUDY NOTES & PREP", bar,
+    "Topics to brush up on, links to resources, practice questions.",
+    "",
+    bar, "INTERVIEW REFLECTIONS", bar,
+    "Post-interview notes: what went well, what to improve, questions they asked.",
+    "",
+    bar, "COMPANY RESEARCH", bar,
+    "Key facts, recent news, product notes, people you've spoken to.",
+    "",
+  ].join("\n");
+}
+
 export class GoogleSheetsClient {
   constructor(config) {
     this.spreadsheetId = config.google_sheets.spreadsheet_id;
@@ -47,8 +73,15 @@ export class GoogleSheetsClient {
     };
     if (service_account_json) {
       authOptions.credentials = service_account_json;
+      this.serviceAccountEmail = service_account_json.client_email || null;
     } else if (service_account_key_file) {
       authOptions.keyFile = service_account_key_file;
+      try {
+        this.serviceAccountEmail =
+          JSON.parse(fs.readFileSync(service_account_key_file, "utf8")).client_email || null;
+      } catch {
+        this.serviceAccountEmail = null;
+      }
     } else {
       throw new Error(
         "No Google credentials configured. Set GOOGLE_SERVICE_ACCOUNT_JSON " +
@@ -59,6 +92,23 @@ export class GoogleSheetsClient {
     this.sheets = google.sheets({ version: "v4", auth });
     this.docs = google.docs({ version: "v1", auth });
     this.drive = google.drive({ version: "v3", auth });
+
+    // Optional OAuth user credentials — used ONLY to create Docs (owned by the
+    // user), which the service account cannot do: a service account has no Drive
+    // storage quota, so it can't own a file. Everything else (Sheets, reading and
+    // appending docs) still runs as the service account.
+    this.docsFolderId = config.google_sheets?.docs_folder_id || null;
+    this.docsFolderName = config.google_sheets?.docs_folder_name || "Job Hunter MCP";
+    const oauth = config.google_oauth;
+    if (oauth?.client_id && oauth?.client_secret && oauth?.refresh_token) {
+      const oauth2 = new google.auth.OAuth2(oauth.client_id, oauth.client_secret);
+      oauth2.setCredentials({ refresh_token: oauth.refresh_token });
+      this.oauthDocs = google.docs({ version: "v1", auth: oauth2 });
+      this.oauthDrive = google.drive({ version: "v3", auth: oauth2 });
+    } else {
+      this.oauthDocs = null;
+      this.oauthDrive = null;
+    }
   }
 
   async ensureSheets() {
@@ -326,82 +376,61 @@ export class GoogleSheetsClient {
 
   // ─── Google Docs ───────────────────────────────────────────────────────────
 
-  // Find a Drive folder by name, returns its ID or null
-  async _findFolder(name) {
-    const res = await this.drive.files.list({
-      q: `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-      fields: "files(id, name)",
-      spaces: "drive",
-    });
-    return res.data.files?.[0]?.id || null;
-  }
+  // Create a new Doc for an application, OWNED BY THE USER (via OAuth), then
+  // share it with the service account so the normal read/append path still works.
+  // A service account can't create Docs itself (no Drive storage quota).
+  async createApplicationDoc(company, role, initialContent) {
+    if (!this.oauthDocs) {
+      throw new Error(
+        "Creating Docs needs OAuth — a service account can't create files (it has no Drive quota). " +
+          "Run `npm run auth`, then set google_oauth (client_id, client_secret, refresh_token). " +
+          "Or create the Doc yourself in Google Drive, share it with the service account, and paste the link."
+      );
+    }
 
-  // Create a new doc for an application with a structured template
-  async createApplicationDoc(company, role) {
     const title = `${company} — ${role} | Interview Notes`;
 
-    const createRes = await this.docs.documents.create({
-      requestBody: { title },
-    });
-
+    // 1. Create the Doc as the user (owned by them, on their Drive quota).
+    const createRes = await this.oauthDocs.documents.create({ requestBody: { title } });
     const docId = createRes.data.documentId;
     const docUrl = `https://docs.google.com/document/d/${docId}/edit`;
 
-    // Move into the Jobs folder if it exists
-    const jobsFolderId = await this._findFolder("Jobs");
-    if (jobsFolderId) {
-      const fileRes = await this.drive.files.get({ fileId: docId, fields: "parents" });
+    // 2. Move it into the applications folder (configured id, else found by name).
+    let folderId = this.docsFolderId;
+    if (!folderId && this.docsFolderName) {
+      const res = await this.oauthDrive.files.list({
+        q: `name='${this.docsFolderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+        fields: "files(id)",
+        spaces: "drive",
+      });
+      folderId = res.data.files?.[0]?.id || null;
+    }
+    if (folderId) {
+      const fileRes = await this.oauthDrive.files.get({ fileId: docId, fields: "parents" });
       const previousParents = fileRes.data.parents?.join(",") || "";
-      await this.drive.files.update({
+      await this.oauthDrive.files.update({
         fileId: docId,
-        addParents: jobsFolderId,
+        addParents: folderId,
         removeParents: previousParents,
         fields: "id, parents",
       });
     }
 
-    // Share as writer so you can edit from any device/account
-    await this.drive.permissions.create({
-      fileId: docId,
-      requestBody: { role: "writer", type: "anyone" },
-    });
+    // 3. Share with the service account so it can read/append afterwards.
+    if (this.serviceAccountEmail) {
+      await this.oauthDrive.permissions.create({
+        fileId: docId,
+        sendNotificationEmail: false,
+        requestBody: { role: "writer", type: "user", emailAddress: this.serviceAccountEmail },
+      });
+    }
 
-    const initialContent = [
-      `${company} — ${role}`,
-      "Interview Process & Notes",
-      "",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "ROLE OVERVIEW",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "Paste job ad summary, key requirements, and your initial take here.",
-      "",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "INTERVIEW STAGES",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "Document each stage: what to expect, who you'll meet, what they assess.",
-      "",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "STUDY NOTES & PREP",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "Topics to brush up on, links to resources, practice questions.",
-      "",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "INTERVIEW REFLECTIONS",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "Post-interview notes: what went well, what to improve, questions they asked.",
-      "",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "COMPANY RESEARCH",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      "Key facts, recent news, product notes, people you've spoken to.",
-      "",
-    ].join("\n");
-
-    await this.docs.documents.batchUpdate({
+    // 4. Write starter content (custom, or the structured template).
+    const content =
+      initialContent && initialContent.trim() ? initialContent : DEFAULT_DOC_TEMPLATE(company, role);
+    await this.oauthDocs.documents.batchUpdate({
       documentId: docId,
-      requestBody: {
-        requests: [{ insertText: { location: { index: 1 }, text: initialContent } }],
-      },
+      requestBody: { requests: [{ insertText: { location: { index: 1 }, text: content } }] },
     });
 
     return { docId, docUrl, title };
@@ -456,6 +485,13 @@ export class GoogleSheetsClient {
     const { rows, rowIndex } = await this._findRow(company, role);
     if (rowIndex === -1) return null;
     return rows[rowIndex][COL.DOC_URL] || null;
+  }
+
+  // Whether an application row exists — checked before creating a doc so we
+  // never create an orphan doc for a company that isn't in the tracker.
+  async applicationExists(company, role) {
+    const { rowIndex } = await this._findRow(company, role);
+    return rowIndex !== -1;
   }
 
   // ─── Interviews ────────────────────────────────────────────────────────────

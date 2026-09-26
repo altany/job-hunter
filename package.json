@@ -12,7 +12,8 @@
     "start:http": "MCP_TRANSPORT=http node src/index.js",
     "dev": "node --watch src/index.js",
     "dev:http": "MCP_TRANSPORT=http node --watch src/index.js",
-    "pack-config": "node scripts/pack-config.js"
+    "pack-config": "node scripts/pack-config.js",
+    "auth": "node scripts/oauth-setup.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

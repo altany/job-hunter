@@ -23,8 +23,9 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 | `add_application` | "Add this to my tracker as Saved" |
 | `update_application` | "Mark Stripe as Interview" |
 | `get_applications` | "Show me my full pipeline" / "What am I currently interviewing for?" |
+| `create_application_doc` | "Create a doc for my Stripe application" — creates a Google Doc (owned by you), links it, writes optional starter content |
 | `get_application_doc` | "Show me my Stripe notes" — reads the linked Google Doc for that application |
-| `update_application_doc` | "Add to my Stripe doc: 4 interview stages, take-home first" |
+| `update_application_doc` | "Add to my Stripe doc: 4 interview stages, take-home first" — appends a section (auto-creates the doc if none is linked) |
 | `prep_interview` | "Prep me for my Stripe final round interview" |
 | `add_interview_note` | "Log that I passed the Stripe phone screen" |
 | `delete_application` | "Delete the duplicate Grafana entry" — removes a row from the tracker (e.g. a duplicate or mistake) |
@@ -187,20 +188,33 @@ The service account needs permission to edit your spreadsheet.
 
 ---
 
-## Step 6: Create Google Docs for your applications
+## Step 6: Application Docs (optional)
 
-For each job you want to track in detail, create a Google Doc manually and link it to your tracker.
+Each application can have one Google Doc for long-form notes (interview stages, study notes, reflections, company research). Two ways to get one:
 
-1. Open [drive.google.com](https://drive.google.com) and create a doc wherever you like (e.g. in a `Jobs` folder)
-2. Name it something like `Stripe — Senior Engineer | Interview Notes`
-3. Copy the doc URL from your browser
-4. Tell Claude or ChatGPT: *"Link this doc to my Stripe application: [paste URL]"* — it will store it in your tracker
+**Auto-create (recommended).** With OAuth set up (Step 6b), just say *"create a doc for my Stripe application"* or *"add to my Stripe doc: …"* — the server creates it in your Drive (owned by you), links it to the tracker, and writes your notes. One doc per application; it won't create duplicates.
 
-Once linked, you can say things like:
+**Manual.** You can always create a Doc yourself in Google Drive, share it with the service-account email as Editor, and link it: *"Link this doc to my Stripe application: [paste URL]"*.
+
+Once linked (either way):
 - *"Show me my Stripe notes"* — returns the full doc content
 - *"Add to my Stripe doc: their process is 4 rounds, starting with a take-home"* — appends a new section
 
-> **Note:** The doc tools *try* to auto-create a doc when one doesn't exist, but with a service account on a personal Google Drive this fails (Drive permission / storage-quota limitations), so for now create the doc manually and link it as above. Making auto-creation work (e.g. via a Shared Drive or user OAuth) is a welcome contribution - PRs welcome.
+### Step 6b: Enable auto-creating Docs (OAuth) — optional
+
+A service account can't create Docs (it has no Drive storage quota), so auto-create acts as *you* via OAuth. Docs end up in your own Drive, owned by you.
+
+1. [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services → Credentials → + Create Credentials → OAuth client ID** → application type **Desktop app** → Create. Copy the **client ID** and **client secret**.
+2. On the **OAuth consent screen** (External): add yourself as a user. To stop the refresh token expiring after 7 days, **Publish** the app (Production). You'll get an "unverified app" warning when you authorise — expected for a personal app; proceed.
+3. Put the client id/secret into `config.json` under `google_oauth` (see `config.example.json`).
+4. Run the one-time flow — it prints a **refresh token**:
+   ```bash
+   npm run auth
+   ```
+   Put the refresh token in `config.json` under `google_oauth.refresh_token` (local), and inside the `GOOGLE_OAUTH_JSON` env var on your host (Render) for remote.
+5. Optional: set `google_sheets.docs_folder_id` to a Drive folder for new docs (otherwise they go to a folder named "Job Hunter MCP" if it exists, else your Drive root).
+
+Without this, everything else still works — you just link docs manually as above.
 
 ---
 

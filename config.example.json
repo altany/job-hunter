@@ -13,7 +13,17 @@
     "spreadsheet_id": "YOUR_GOOGLE_SHEET_ID_HERE",
     "applications_sheet_gid": 0,
     "_credentials_note": "Local: set service_account_key_file to a path. Hosted: leave it out and provide the key via the GOOGLE_SERVICE_ACCOUNT_JSON env var instead.",
-    "service_account_key_file": "/absolute/path/to/service-account-key.json"
+    "service_account_key_file": "/absolute/path/to/service-account-key.json",
+    "_docs_folder_note": "Optional: Drive folder ID that auto-created application Docs are moved into (leave out to fall back to a folder named docs_folder_name, else your Drive root).",
+    "docs_folder_id": "",
+    "docs_folder_name": "Job Hunter MCP"
+  },
+
+  "_google_oauth_note": "Optional — only needed to AUTO-CREATE Google Docs (a service account can't; it has no Drive quota). Create an OAuth client (type: Desktop app) in Google Cloud, put its client_id/client_secret here, then run `npm run auth` once to fill in refresh_token. Docs get created in YOUR Drive, owned by you. Hosted: provide the whole object via the GOOGLE_OAUTH_JSON env var.",
+  "google_oauth": {
+    "client_id": "",
+    "client_secret": "",
+    "refresh_token": ""
   },
 
   "preferences": {

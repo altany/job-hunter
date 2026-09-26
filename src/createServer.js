@@ -42,12 +42,12 @@ export function loadContextFiles(config = {}) {
 const INSTRUCTIONS = `
 This server is a personal job-search tracker backed by Google Sheets (one row per application) and, optionally, one Google Doc per application for long-form notes.
 
-Typical flow: rate_job (research + score a role) → add_application (save it) → update_application (keep it current as it progresses) → get_application_doc / update_application_doc (long-form notes) → prep_interview (before a call).
+Typical flow: rate_job (research + score a role) → add_application (save it) → update_application (keep it current as it progresses) → create_application_doc / get_application_doc / update_application_doc (long-form notes) → prep_interview (before a call).
 
 Rules that avoid the common mistakes:
 - To change ANYTHING about an application that is already in the tracker — status, rating, notes, next step, salary, work type, location, or a linked doc — use update_application. Do NOT use add_application for a company that already exists; that creates a duplicate row. add_application is only for a company/role not yet tracked.
 - Applications are matched leniently by company + role. If update_application says it can't find the row, call get_applications to see the exact company/role text, then retry with that (or use delete_application to remove a duplicate).
-- Google Docs are NOT created automatically (the service account can't create Docs on a personal Drive). The user creates the Doc in Google Drive, shares it with the service-account email as Editor, and links it. To read or append notes: if the user gives a doc link, pass it as doc_url to get_application_doc / update_application_doc — that links it, then reads/appends. If no doc is linked and no URL is given, ask the user for the Google Doc URL. Do not say it's impossible and do not try to create one. If access fails after linking, the Doc hasn't been shared with the service account.
+- Each application can have one linked Google Doc for long-form notes. Use create_application_doc to make one (it's created automatically, owned by the user), get_application_doc to read it, and update_application_doc to append a section (it auto-creates the doc if none is linked yet). The user can also paste an existing doc's link as doc_url. There is one doc per application — the tools won't create a duplicate if one is already linked. (If doc creation ever errors that OAuth isn't set up, the user needs to run 'npm run auth' once; a service account alone can't create Docs.)
 - rate_job, tailor_cv, generate_cover_letter and prep_interview return an instruction prompt for you to carry out. They already include the user's CV, preferences and background, so don't ask the user for those.
 - Notes are appended, never overwritten. Statuses: Saved, Applied, Phone Screen, Interview, Offer, Rejected, Withdrawn.
 `.trim();
