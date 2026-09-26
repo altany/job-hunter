@@ -1,5 +1,7 @@
 import { google } from "googleapis";
 import fs from "fs";
+import { createFormatter } from "./docFormatter.js";
+import { docToMarkdown } from "./docSections.js";
 
 // Column index map (0-based) for Applications sheet
 // A=0  B=1       C=2     D=3    E=4       F=5         G=6        H=7      I=8      J=9           K=10        L=11    M=12          N=13
@@ -128,6 +130,13 @@ export class GoogleSheetsClient {
         headers: [
           "Date", "Company", "Role", "Round", "Interviewers",
           "Interview Date", "Notes", "Outcome",
+        ],
+      },
+      {
+        title: "Doc edits",
+        headers: [
+          "Timestamp", "Company", "Role", "Doc URL", "Heading",
+          "Chars before", "Chars after", "Revision before", "Removed text", "Result",
         ],
       },
     ];
@@ -433,26 +442,21 @@ export class GoogleSheetsClient {
       requestBody: { requests: [{ insertText: { location: { index: 1 }, text: content } }] },
     });
 
-    return { docId, docUrl, title };
+    // 5. Style the markup (the service account has access now).
+    const formatting = await this.formatDoc(docUrl);
+
+    return { docId, docUrl, title, formatting };
   }
 
-  // Read the full plain text content of a Google Doc
+  // Read a Google Doc as text. Sub-headings, bullets, bold and tables come back
+  // in the same markdown the write tools accept, so a section can be read,
+  // edited and written back with replace_doc_section without losing structure.
   async readDoc(docUrl) {
     const docId = extractDocId(docUrl);
     if (!docId) throw new Error(`Could not extract document ID from URL: ${docUrl}`);
 
     const res = await this.docs.documents.get({ documentId: docId });
-    const content = res.data.body.content;
-
-    let text = "";
-    for (const element of content) {
-      if (element.paragraph) {
-        for (const pe of element.paragraph.elements) {
-          if (pe.textRun) text += pe.textRun.content;
-        }
-      }
-    }
-    return text.trim();
+    return docToMarkdown(res.data.body.content);
   }
 
   // Append a new labelled section to the doc
@@ -478,6 +482,90 @@ export class GoogleSheetsClient {
     });
 
     return `✅ Added "${heading}" section to the doc (${now}).`;
+  }
+
+  // Fetch a doc's body and current revision id.
+  async getDoc(docUrl) {
+    const docId = extractDocId(docUrl);
+    if (!docId) throw new Error(`Could not extract document ID from URL: ${docUrl}`);
+    const res = await this.docs.documents.get({ documentId: docId });
+    return { docId, content: res.data.body.content, revisionId: res.data.revisionId };
+  }
+
+  // Apply Docs styling to the markup in a doc. Never throws: a formatting
+  // failure must not undo or hide a successful write.
+  async formatDoc(docUrl) {
+    try {
+      const docId = extractDocId(docUrl) || docUrl;
+      const { errors } = await createFormatter(this.docs)(docId);
+      return { ok: errors.length === 0, errors };
+    } catch (e) {
+      return { ok: false, errors: [e.message] };
+    }
+  }
+
+  // Replace the body of one section (heading kept). The write is pinned to the
+  // revision we read, so if the doc changed in the meantime Docs rejects it.
+  async replaceSectionBody(docId, { bodyStart, bodyEnd, content, revisionId }) {
+    const text = content + "\n";
+    const requests = [];
+    if (bodyEnd > bodyStart) {
+      requests.push({ deleteContentRange: { range: { startIndex: bodyStart, endIndex: bodyEnd } } });
+    }
+    const range = { startIndex: bodyStart, endIndex: bodyStart + text.length };
+    requests.push(
+      { insertText: { location: { index: bodyStart }, text } },
+      // Inserted text inherits the style of the paragraph it lands in (often the
+      // next heading), so reset it to plain body text before formatting.
+      { updateParagraphStyle: { range, paragraphStyle: { namedStyleType: "NORMAL_TEXT" }, fields: "namedStyleType" } },
+      { deleteParagraphBullets: { range } },
+      {
+        updateTextStyle: {
+          range,
+          textStyle: {},
+          fields: "bold,italic,underline,strikethrough,weightedFontFamily,backgroundColor,foregroundColor,fontSize,link",
+        },
+      }
+    );
+    await this.docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: { requests, writeControl: { requiredRevisionId: revisionId } },
+    });
+  }
+
+  // Append a row to the "Doc edits" tab. Written BEFORE the doc is changed so
+  // the removed text is on record even if the write half-fails; the Result
+  // column is filled in afterwards via setDocEditResult. Returns the row's range.
+  async logDocEdit(entry) {
+    await this.ensureSheets();
+    const MAX = 45000; // Sheets cells hold 50,000 chars
+    const removed = entry.removedText.length > MAX
+      ? entry.removedText.slice(0, MAX) + "\n…[truncated]"
+      : entry.removedText;
+    const res = await this.sheets.spreadsheets.values.append({
+      spreadsheetId: this.spreadsheetId,
+      range: "Doc edits!A:J",
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[
+          new Date().toISOString(), entry.company, entry.role, entry.docUrl, entry.heading,
+          entry.charsBefore, entry.charsAfter, entry.revisionBefore || "", removed, "pending",
+        ]],
+      },
+    });
+    return res.data.updates?.updatedRange || null;
+  }
+
+  // Fill in the Result cell of a row written by logDocEdit.
+  async setDocEditResult(rowRange, result) {
+    const row = rowRange?.match(/![A-Z]+(\d+)/)?.[1];
+    if (!row) return;
+    await this.sheets.spreadsheets.values.update({
+      spreadsheetId: this.spreadsheetId,
+      range: `Doc edits!J${row}`,
+      valueInputOption: "RAW",
+      requestBody: { values: [[result]] },
+    });
   }
 
   // Get the doc URL stored for an application

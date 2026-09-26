@@ -26,6 +26,7 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 | `create_application_doc` | "Create a doc for my Stripe application" — creates a Google Doc (owned by you), links it, writes optional starter content |
 | `get_application_doc` | "Show me my Stripe notes" — reads the linked Google Doc for that application |
 | `update_application_doc` | "Add to my Stripe doc: 4 interview stages, take-home first" — appends a section (auto-creates the doc if none is linked) |
+| `replace_doc_section` | "Rewrite the Round 1 reflection in my Stripe doc" — replaces one section; shows a preview first and only writes once you confirm |
 | `prep_interview` | "Prep me for my Stripe final round interview" |
 | `add_interview_note` | "Log that I passed the Stripe phone screen" |
 | `delete_application` | "Delete the duplicate Grafana entry" — removes a row from the tracker (e.g. a duplicate or mistake) |
@@ -199,6 +200,17 @@ Each application can have one Google Doc for long-form notes (interview stages, 
 Once linked (either way):
 - *"Show me my Stripe notes"* — returns the full doc content
 - *"Add to my Stripe doc: their process is 4 rounds, starting with a take-home"* — appends a new section
+- *"Rewrite the Round 1 reflection in my Stripe doc: …"* — replaces that one section
+
+**Formatting.** The assistant writes plain markdown (`## Sub-heading`, `- bullets`, `**bold**`, tables, code blocks) and the server turns it into real Docs styling after every write. For a doc you edited by hand, you can run the same formatter yourself: `node scripts/format-doc-headings.js <docId>`.
+
+**Correcting a section.** Each section heading appears once per doc: adding a section whose heading already exists is refused, and you're pointed to `replace_doc_section` instead. That tool:
+- replaces one section only (its heading plus everything up to the next heading of the same or higher level); if the heading matches no section or more than one, it changes nothing and lists the headings it found
+- does a dry run by default, showing what would be removed and what would replace it; it writes only when called again with `confirm: true`
+- before writing, saves the removed text, the character counts and the doc's revision id in a **Doc edits** tab of your tracker spreadsheet, so anything replaced can be pasted back
+- refuses to write if the doc changed since the preview
+
+There is deliberately no tool that deletes a doc or clears all of it.
 
 ### Step 6b: Enable auto-creating Docs (OAuth) — optional
 

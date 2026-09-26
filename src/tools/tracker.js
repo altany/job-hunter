@@ -4,7 +4,20 @@
  * logic as before; only the wrapping (registry instead of a switch) changed.
  */
 
+import {
+  normalizeContent,
+  normalizeHeading,
+  parseSections,
+  textInRange,
+  contentHeadingLevels,
+  CONTENT_MARKUP_HELP,
+} from "../docSections.js";
+
 const noauth = { securitySchemes: [{ type: "noauth" }] };
+
+const textResult = (text) => ({ content: [{ type: "text", text }] });
+const errorResult = (text) => ({ content: [{ type: "text", text }], isError: true });
+const formatNote = (f) => (f && !f.ok ? `\n⚠️ Written, but formatting hit a problem: ${f.errors.join("; ")}` : "");
 
 const STATUS_ENUM = [
   "Saved", "Applied", "Phone Screen", "Interview", "Offer", "Rejected", "Withdrawn",
@@ -161,7 +174,7 @@ export const trackerTools = [
       name: "update_application_doc",
       annotations: { title: "Update application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description:
-        "Append a section (heading + content) to the Google Doc linked to an application — interview stages, study notes, reflections, company research, etc. If no doc is linked yet, one is created automatically (owned by you) and linked, then the section is appended. You can also pass an existing doc's URL as doc_url to link it first.",
+        "Append a section (heading + content) to the Google Doc linked to an application — interview stages, study notes, reflections, company research, etc. If no doc is linked yet, one is created automatically (owned by you) and linked, then the section is appended. You can also pass an existing doc's URL as doc_url to link it first. A section heading can only appear once per doc: to change an existing section, use replace_doc_section instead.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -174,7 +187,7 @@ export const trackerTools = [
             description:
               "Section heading, e.g. 'Round 1 Reflection', 'Study Notes', 'Interview Process', 'Company Research'",
           },
-          content: { type: "string", description: "The content to add under this heading" },
+          content: { type: "string", description: `The content to add under this heading. ${CONTENT_MARKUP_HELP}` },
           doc_url: { type: "string", description: "Google Doc URL to link to this application before appending (optional; the doc must be shared with the service account as Editor)." },
         },
         required: ["company_name", "role_title", "heading", "content"],
@@ -222,10 +235,26 @@ export const trackerTools = [
         }
       }
 
+      // One section per heading: appending a second copy is how docs got messy.
       try {
-        const result = await sheets.appendToDoc(docUrl, args.heading, args.content);
+        const { content } = await sheets.getDoc(docUrl);
+        const wanted = normalizeHeading(args.heading);
+        const existing = parseSections(content).find((sec) => sec.level <= 2 && sec.normalized === wanted);
+        if (existing) {
+          return errorResult(
+            `This doc already has a "${existing.text}" section, so I didn't add another one. ` +
+              `To change it, use replace_doc_section with heading "${args.heading}". Nothing was changed.`
+          );
+        }
+      } catch (e) {
+        return errorResult(`Couldn't read the doc to check its sections (${e.message}). Nothing was changed.`);
+      }
+
+      try {
+        const result = await sheets.appendToDoc(docUrl, args.heading, normalizeContent(args.content));
+        const formatting = await sheets.formatDoc(docUrl);
         const prefix = created ? `📄 Created a new doc for ${args.company_name} and linked it.\n` : "";
-        return { content: [{ type: "text", text: `${prefix}${result}\n📄 ${docUrl}` }] };
+        return textResult(`${prefix}${result}${formatNote(formatting)}\n📄 ${docUrl}`);
       } catch (e) {
         return {
           content: [{ type: "text", text: `Couldn't write to the doc (${e.message}). Make sure it's shared with the service account as Editor.` }],
@@ -250,7 +279,7 @@ export const trackerTools = [
           role_title: { type: "string" },
           initial_content: {
             type: "string",
-            description: "Optional starter content for the doc. If omitted, a structured interview-notes template is used.",
+            description: `Optional starter content for the doc. If omitted, a structured interview-notes template is used. ${CONTENT_MARKUP_HELP}`,
           },
         },
         required: ["company_name", "role_title"],
@@ -270,10 +299,10 @@ export const trackerTools = [
         };
       }
       try {
-        const { docUrl } = await sheets.createApplicationDoc(
+        const { docUrl, formatting } = await sheets.createApplicationDoc(
           args.company_name,
           args.role_title,
-          args.initial_content
+          args.initial_content ? normalizeContent(args.initial_content) : undefined
         );
         await sheets.updateApplication({
           company_name: args.company_name,
@@ -281,7 +310,7 @@ export const trackerTools = [
           doc_url: docUrl,
         });
         return {
-          content: [{ type: "text", text: `📄 Created a new doc for ${args.company_name} and linked it to your tracker:\n${docUrl}` }],
+          content: [{ type: "text", text: `📄 Created a new doc for ${args.company_name} and linked it to your tracker:\n${docUrl}${formatNote(formatting)}` }],
         };
       } catch (e) {
         return {
@@ -289,6 +318,142 @@ export const trackerTools = [
           isError: true,
         };
       }
+    },
+  },
+  {
+    name: "replace_doc_section",
+    definition: {
+      name: "replace_doc_section",
+      annotations: { title: "Replace doc section", readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      description:
+        "Replace the content of ONE section in an application's Google Doc — use it to correct or rewrite a section instead of appending a second copy. " +
+        "A section is a heading plus everything under it up to the next heading of the same or higher level; the heading itself is kept, only what's under it is replaced. " +
+        "The heading must match exactly one section (case, markup and the trailing date are ignored, so 'Round 1 reflection' matches 'ROUND 1 REFLECTION — 26 Sept 2026'); if it matches none or several, nothing is changed and the available headings are listed. " +
+        "By default this is a DRY RUN: it shows what would be removed and what would replace it, and changes nothing. Show that preview to the user, and only call again with confirm: true once they agree. " +
+        "Every replace is logged (with the removed text) in the tracker's 'Doc edits' tab. This tool can't delete a doc or clear all of it.",
+      securitySchemes: [{ type: "noauth" }],
+      _meta: noauth,
+      inputSchema: {
+        type: "object",
+        properties: {
+          company_name: { type: "string" },
+          role_title: { type: "string" },
+          heading: {
+            type: "string",
+            description: "The heading of the section to replace, as it appears in the doc (the date after '—' can be left out).",
+          },
+          new_content: {
+            type: "string",
+            description: `The new content for the section (without the section heading itself — that stays). Sub-headings in it must be smaller than the section's own heading. ${CONTENT_MARKUP_HELP}`,
+          },
+          confirm: {
+            type: "boolean",
+            description: "false (default) = dry run, only preview. true = actually replace. Only set true after the user has seen the preview and agreed.",
+          },
+        },
+        required: ["company_name", "role_title", "heading", "new_content"],
+      },
+    },
+    handler: async (args, { sheets }) => {
+      const docUrl = await sheets.getDocUrl(args.company_name, args.role_title);
+      if (!docUrl) {
+        return errorResult(`No doc is linked for "${args.role_title}" at ${args.company_name}. Nothing was changed.`);
+      }
+
+      const newContent = normalizeContent(args.new_content);
+      if (!newContent) {
+        return errorResult("new_content is empty. This tool replaces a section's content; it doesn't clear sections. Nothing was changed.");
+      }
+
+      // Read the doc and find exactly one matching section.
+      const locate = async () => {
+        const doc = await sheets.getDoc(docUrl);
+        const sections = parseSections(doc.content);
+        const wanted = normalizeHeading(args.heading);
+        const matches = sections.filter((sec) => sec.normalized === wanted);
+        return { doc, sections, matches };
+      };
+
+      let found;
+      try { found = await locate(); }
+      catch (e) { return errorResult(`Couldn't read the doc (${e.message}). Nothing was changed.`); }
+
+      const listHeadings = (sections) =>
+        sections.length
+          ? sections.map((sec) => `${"  ".repeat(Math.max(0, sec.level - 2))}- ${sec.text}`).join("\n")
+          : "(no headings found)";
+
+      if (found.matches.length !== 1) {
+        const why = found.matches.length === 0
+          ? `No section in the doc matches "${args.heading}".`
+          : `"${args.heading}" matches ${found.matches.length} sections, so I can't tell which one to replace.`;
+        return errorResult(`${why} Nothing was changed.\n\nHeadings in the doc:\n${listHeadings(found.sections)}`);
+      }
+
+      const section = found.matches[0];
+      // A top-level (Heading 1) heading usually spans the whole doc, which this
+      // tool must never replace.
+      if (section.level < 2) {
+        return errorResult(`"${section.text}" is a top-level heading that covers the whole doc, and this tool only replaces single sections. Nothing was changed.`);
+      }
+      const tooBig = contentHeadingLevels(newContent).filter((lvl) => lvl <= section.level);
+      if (tooBig.length) {
+        return errorResult(
+          `new_content contains a heading as big as (or bigger than) the section's own heading "${section.text}", ` +
+            "which would split the doc into extra sections. Use smaller sub-headings (e.g. ### or '-- Heading --'). Nothing was changed."
+        );
+      }
+
+      const removedText = textInRange(found.doc.content, section.bodyStart, section.bodyEnd);
+      const charsBefore = removedText.length;
+      const charsAfter = newContent.length;
+
+      if (!args.confirm) {
+        return textResult(
+          `DRY RUN — nothing has been changed.\n\n` +
+            `Section: "${section.text}"\n` +
+            `Would remove (${charsBefore} chars):\n----------\n${removedText || "(empty)"}\n----------\n\n` +
+            `Would replace it with (${charsAfter} chars):\n----------\n${newContent}\n----------\n\n` +
+            `To apply this, call replace_doc_section again with the same arguments and confirm: true.`
+        );
+      }
+
+      // Log the old content first, so it's recoverable whatever happens next.
+      let logRow;
+      try {
+        logRow = await sheets.logDocEdit({
+          company: args.company_name,
+          role: args.role_title,
+          docUrl,
+          heading: section.text,
+          charsBefore,
+          charsAfter,
+          revisionBefore: found.doc.revisionId,
+          removedText,
+        });
+      } catch (e) {
+        return errorResult(`Couldn't write the edit log (${e.message}), so I didn't touch the doc. Nothing was changed.`);
+      }
+
+      try {
+        // Pinned to the revision we just read: if the doc changed since, Docs rejects it.
+        await sheets.replaceSectionBody(found.doc.docId, {
+          bodyStart: section.bodyStart,
+          bodyEnd: section.bodyEnd,
+          content: newContent,
+          revisionId: found.doc.revisionId,
+        });
+      } catch (e) {
+        await sheets.setDocEditResult(logRow, `failed: ${e.message}`).catch(() => {});
+        return errorResult(`Couldn't replace the section (${e.message}). Nothing was changed — if the doc was edited in the meantime, run the dry run again.`);
+      }
+
+      await sheets.setDocEditResult(logRow, "applied").catch(() => {});
+      const formatting = await sheets.formatDoc(docUrl);
+      return textResult(
+        `✅ Replaced the "${section.text}" section (${charsBefore} → ${charsAfter} chars). ` +
+          `The old text is saved in the tracker's "Doc edits" tab.${formatNote(formatting)}\n📄 ${docUrl}`
+      );
     },
   },
   {
