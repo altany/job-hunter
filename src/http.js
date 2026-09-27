@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import crypto from "crypto";
 import { createServer } from "./createServer.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { requireAuth, assertAuthConfigured } from "./auth.js";
@@ -17,48 +16,33 @@ export async function startHttpServer() {
   const app = express();
   const port = process.env.PORT || 3001;
 
-  app.use(cors({ exposedHeaders: ["mcp-session-id"] }));
+  app.use(cors());
   app.use(express.json({ limit: "5mb" }));
 
   // Unauthenticated liveness probe for the platform health check.
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-  const transports = {};
-
+  // Stateless: every POST gets a fresh server + transport and no session id.
+  // The server keeps nothing between requests, and in-memory sessions were
+  // lost on every restart (deploys, free-tier sleep), leaving clients stuck on
+  // "No valid session ID". Without sessions a restart is invisible to clients,
+  // and a client still sending an old session id is simply served.
   async function handleMcpPost(req, res) {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      // Respond with plain application/json instead of an SSE stream.
+      // Some hosts/clients (e.g. ChatGPT behind certain edge proxies) don't
+      // consume the text/event-stream response cleanly and surface a 502;
+      // JSON responses proxy reliably. Streaming isn't needed here.
+      enableJsonResponse: true,
+    });
+    const server = createServer();
+    res.on("close", () => {
+      transport.close();
+      server.close();
+    });
     try {
-      const sessionId = req.headers["mcp-session-id"];
-      let transport = sessionId ? transports[sessionId] : undefined;
-
-      if (!transport) {
-        if (req.body?.method !== "initialize") {
-          return res.status(400).json({
-            jsonrpc: "2.0",
-            error: { code: -32000, message: "Bad Request: No valid session ID provided" },
-            id: null,
-          });
-        }
-
-        transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => crypto.randomUUID(),
-          // Respond with plain application/json instead of an SSE stream.
-          // Some hosts/clients (e.g. ChatGPT behind certain edge proxies) don't
-          // consume the text/event-stream response cleanly and surface a 502;
-          // JSON responses proxy reliably. Streaming isn't needed here.
-          enableJsonResponse: true,
-          onsessioninitialized: (newSessionId) => {
-            transports[newSessionId] = transport;
-          },
-        });
-
-        transport.onclose = async () => {
-          if (transport.sessionId) delete transports[transport.sessionId];
-        };
-
-        const server = createServer();
-        await server.connect(transport);
-      }
-
+      await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
     } catch (err) {
       console.error("POST /mcp error:", err);
@@ -72,16 +56,13 @@ export async function startHttpServer() {
     }
   }
 
-  async function handleSessionRequest(req, res) {
-    try {
-      const sessionId = req.headers["mcp-session-id"];
-      const transport = sessionId ? transports[sessionId] : undefined;
-      if (!transport) return res.status(400).send("Invalid or missing session ID");
-      await transport.handleRequest(req, res);
-    } catch (err) {
-      console.error(`${req.method} /mcp error:`, err);
-      if (!res.headersSent) res.status(500).send("Internal server error");
-    }
+  // No sessions means no server-initiated stream (GET) or session to end (DELETE).
+  function methodNotAllowed(_req, res) {
+    res.status(405).set("Allow", "POST").json({
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Method not allowed." },
+      id: null,
+    });
   }
 
   // Two equivalent mount points, both authenticated:
@@ -89,12 +70,12 @@ export async function startHttpServer() {
   //   /mcp/:token     — auth via token in the URL (fallback for clients that
   //                     can't set custom headers)
   app.post("/mcp", requireAuth, handleMcpPost);
-  app.get("/mcp", requireAuth, handleSessionRequest);
-  app.delete("/mcp", requireAuth, handleSessionRequest);
+  app.get("/mcp", requireAuth, methodNotAllowed);
+  app.delete("/mcp", requireAuth, methodNotAllowed);
 
   app.post("/mcp/:token", requireAuth, handleMcpPost);
-  app.get("/mcp/:token", requireAuth, handleSessionRequest);
-  app.delete("/mcp/:token", requireAuth, handleSessionRequest);
+  app.get("/mcp/:token", requireAuth, methodNotAllowed);
+  app.delete("/mcp/:token", requireAuth, methodNotAllowed);
 
   app.listen(port, () => {
     console.log(`Job-hunter MCP (HTTP) listening on :${port}/mcp`);
