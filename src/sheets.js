@@ -572,14 +572,23 @@ export class GoogleSheetsClient {
     return res.data.files?.[0]?.id || null;
   }
 
-  // Upload a PDF to the applications folder as the user; a file with the same
-  // name there is updated in place rather than duplicated. Returns its link.
-  async uploadPdf(filePath, name) {
+  // Put a generated CV PDF in the applications folder for a short while, so a
+  // hosted server can hand it over. These files are tagged, updated in place
+  // when the same name is generated again, and any older than a day are
+  // deleted whenever a new one is made. Returns the new file's link.
+  async uploadTempPdf(filePath, name) {
     if (!this.oauthDrive) throw new Error("OAuth isn't set up (run 'npm run auth'), so I can't upload to your Drive");
+    const tag = "appProperties has { key='jobHunterTempCvPdf' and value='1' } and trashed=false";
+
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const old = await this.oauthDrive.files.list({ q: `${tag} and modifiedTime < '${dayAgo}'`, fields: "files(id)", spaces: "drive" });
+    for (const f of old.data.files || []) {
+      await this.oauthDrive.files.delete({ fileId: f.id }).catch(() => {});
+    }
+
     const folderId = await this._appFolderId();
-    const escaped = name.replace(/'/g, "\\'");
     const existing = await this.oauthDrive.files.list({
-      q: `name='${escaped}' and trashed=false${folderId ? ` and '${folderId}' in parents` : ""}`,
+      q: `${tag} and name='${name.replace(/'/g, "\\'")}'`,
       fields: "files(id)",
       spaces: "drive",
     });
@@ -588,7 +597,12 @@ export class GoogleSheetsClient {
     const res = id
       ? await this.oauthDrive.files.update({ fileId: id, media, fields: "id, webViewLink" })
       : await this.oauthDrive.files.create({
-          requestBody: { name, mimeType: "application/pdf", ...(folderId ? { parents: [folderId] } : {}) },
+          requestBody: {
+            name,
+            mimeType: "application/pdf",
+            appProperties: { jobHunterTempCvPdf: "1" },
+            ...(folderId ? { parents: [folderId] } : {}),
+          },
           media,
           fields: "id, webViewLink",
         });

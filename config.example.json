@@ -4,7 +4,7 @@
   "cv_text": "",
   "_context_note": "Rich freeform context lives in context/*.md (read from disk locally). For hosted use, `npm run pack-config` inlines it here as 'context_text' automatically — you don't edit this by hand.",
 
-  "_cv_pdf_note": "Optional: how generate_cv_pdf finds your CV repo (one with scripts/generate-cv-pdf.tsx accepting --json/--out). Local: repo_path (defaults to <repo> when cv_file_path is <repo>/src/cv/cv.ts). Hosted: github_repo, a public 'owner/repo' downloaded at its latest commit. output_dir (local only) defaults to ~/Downloads; the PDF is also uploaded to your Drive.",
+  "_cv_pdf_note": "Optional: how generate_cv_pdf finds your CV repo (one with scripts/generate-cv-pdf.tsx accepting --json/--out). Local: repo_path (defaults to <repo> when cv_file_path is <repo>/src/cv/cv.ts). Hosted: github_repo, a public 'owner/repo' downloaded at its latest commit. output_dir (local only) defaults to ~/Downloads; the hosted server puts a temporary copy in Drive instead (deleted after a day).",
   "cv_pdf": {
     "repo_path": "",
     "github_repo": "",

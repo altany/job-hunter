@@ -127,7 +127,7 @@ export const cvTools = [
       annotations: { title: "Generate CV PDF", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
         "Build the PDF of an application's tailored CV from the JSON in its doc's 'Tailored CV' section (including any edits the user made there), using the user's own CV PDF script. " +
-        "The PDF is uploaded to the user's Drive next to the application docs (and, on the local server, also saved to their computer). " +
+        "On the local server the PDF is saved to the user's computer (Downloads); on the hosted server it's put in their Drive as a temporary copy (removed once it's over a day old). " +
         "Only call this after the user has said the tailored CV in the doc is approved.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
@@ -166,8 +166,8 @@ export const cvTools = [
         return errorResult(`The CV in the doc doesn't match the base CV's shape (maybe an edit removed or renamed something). No PDF was made.\n- ${problems.join("\n- ")}`);
       }
 
-      // Locally the PDF goes to output_dir; either way it's uploaded to Drive,
-      // next to the application docs, so it can be opened from anywhere.
+      // Locally the PDF only goes to output_dir. A hosted server can't reach the
+      // user's computer, so it puts the PDF in Drive for a day instead.
       const fileName = `${slug(cv.header.name || "CV")}-CV-${slug(args.company_name)}.pdf`;
       const local = renderer.source === "local";
       const outDir = local
@@ -177,18 +177,16 @@ export const cvTools = [
 
       try {
         await renderCvPdf(renderer, cv, outPath);
-        let driveLink = null;
-        let driveError = null;
-        try { driveLink = await sheets.uploadPdf(outPath, fileName); }
-        catch (e) { driveError = e.message; }
-
-        if (!local && !driveLink) return errorResult(`The PDF was made but couldn't be uploaded to Drive (${driveError}).`);
-        const lines = ["✅ CV PDF ready, built from the Tailored CV section of the doc."];
-        if (local) lines.push(`On this computer: ${outPath}`);
-        if (driveLink) lines.push(`In Drive: ${driveLink}`);
-        else lines.push(`⚠️ Not uploaded to Drive: ${driveError}`);
-        lines.push(`📄 ${docUrl}`);
-        return textResult(lines.join("\n"));
+        if (local) {
+          return textResult(`✅ CV PDF ready, built from the Tailored CV section of the doc:\n${outPath}\n📄 ${docUrl}`);
+        }
+        let link;
+        try { link = await sheets.uploadTempPdf(outPath, fileName); }
+        catch (e) { return errorResult(`The PDF was made but couldn't be put in Drive (${e.message}).`); }
+        return textResult(
+          `✅ CV PDF ready, built from the Tailored CV section of the doc:\n${link}\n` +
+            `It's a temporary copy: download it for the application. Copies older than a day are deleted the next time a CV PDF is made.\n📄 ${docUrl}`
+        );
       } catch (e) {
         return errorResult(`Couldn't make the PDF: ${e.message}.`);
       } finally {
