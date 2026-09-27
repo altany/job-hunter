@@ -11,6 +11,8 @@
 
 import { CV_TYPE } from "../cvSchema.js";
 
+const STYLE_NOTE = "If the candidate's context includes writing-style rules, they override any style guidance here.";
+
 function rateJob(args, cvText, preferences, contextFiles) {
   return `
 You are a career coach helping evaluate a job opportunity for a candidate who is actively interviewing.
@@ -202,7 +204,7 @@ ${args.job_ad}
 - Same shape: same keys, no new fields, no missing required fields. header.name, header.email and header.website stay exactly as they are; header.title can be adjusted to the role.
 - Keep every role in "experience", in the same date order. Within a role you can rewrite the summary and reorder, rewrite or drop bullets.
 - Keep the length about the same (similar number of bullets and strengths) so it still fits the PDF layout.
-- Write plainly, in the candidate's own voice. No buzzwords or clever phrasing.
+- Write plainly, in the candidate's own voice. No buzzwords or clever phrasing. ${STYLE_NOTE}
 - Values are plain text: no markdown (**, _, backticks) and no leading dashes, because the PDF shows them literally.
 
 ## What to do
@@ -214,8 +216,29 @@ ${args.job_ad}
 }
 
 function generateCoverLetter(args, cvText, preferences, contextFiles) {
+  const letter = args.skip_cover_letter
+    ? ""
+    : `
+### Cover letter
+Write a ${args.tone || "conversational"} cover letter that:
+- Opens with why this role and company, not "I am writing to apply for..."
+- Connects the candidate's specific experience to the role's key needs
+- Shows genuine interest in this company specifically
+- Is 3-4 paragraphs, under 400 words
+- Ends with a clear next step
+Ready to send, no placeholders.
+`;
+  const answers = args.application_questions
+    ? `
+### Application answers
+Answer each question below in the candidate's voice, using their real experience. Respect any word or character limits. Keep each question as a sub-heading followed by the answer.
+
+${args.application_questions}
+`
+    : "";
+
   return `
-You are an expert career coach writing a cover letter.
+You are helping the candidate write their application.
 
 ## Candidate CV
 ${cvText}
@@ -228,7 +251,6 @@ ${contextFiles}
 ## Target Role
 Company: ${args.company_name}
 Role: ${args.role_title}
-Tone: ${args.tone || "conversational"}
 
 ## Job Ad
 ${args.job_ad}
@@ -236,15 +258,11 @@ ${args.job_ad}
 ## Specific Points to Include
 ${args.specific_notes || "None specified"}
 
-## Instructions
-Write a compelling, ${args.tone || "conversational"} cover letter that:
-- Opens with a strong hook (not "I am writing to apply for...")
-- Connects the candidate's specific experience to the role's key needs
-- Shows genuine interest in this company specifically
-- Is 3-4 paragraphs, under 400 words
-- Ends with a confident, clear call to action
-
-Output the cover letter ready to send (no placeholders). Show it to the user; once they're happy with it, save it in the application's Google Doc with update_application_doc (heading "Cover letter"), or replace_doc_section if that section already exists. Don't create separate files.
+## What to write
+${STYLE_NOTE}
+${letter}${answers}
+## Then
+Show the drafts to the user. Once they're happy, save them in the application's Google Doc with update_application_doc, each as its own section ("Cover letter", "Application answers"), or replace_doc_section if that section already exists. Don't create separate files.
 `.trim();
 }
 
@@ -282,6 +300,7 @@ ${args.job_ad || "Not provided"}
 ${args.extra_context || "None"}
 
 ## Your Task
+${STYLE_NOTE}
 Generate comprehensive interview prep materials:
 
 ### 🏢 Company Research Points
@@ -315,7 +334,7 @@ export const promptTools = [
       name: "rate_job",
       annotations: { title: "Rate a job", readOnlyHint: true, openWorldHint: true },
       description:
-        "Rate a job posting against your CV and preferences. Paste the full job ad text to get a detailed score and recommendation. IMPORTANT: Before scoring, this tool will automatically research the company on Glassdoor, check salary data (including any geo-adjustment for your location), investigate the interview process, and check for dealbreakers. You will receive a full picture — research summary, dealbreaker check, scored breakdown, interview process notes, and specific talking points — so you can decide whether to apply without any additional back-and-forth.",
+        "Rate a job posting against your CV and preferences. Paste the full job ad text to get a detailed score and recommendation. IMPORTANT: Before scoring, this tool will automatically research the company on Glassdoor, check salary data (including any geo-adjustment for your location), investigate the interview process, and check for dealbreakers. You will receive a full picture — research summary, dealbreaker check, scored breakdown, interview process notes, and specific talking points — so you can decide whether to apply without any additional back-and-forth. If the user tracks the role, offer to save the research in the application's Google Doc (update_application_doc) rather than as a separate file.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -349,11 +368,6 @@ export const promptTools = [
           company_name: { type: "string" },
           role_title: { type: "string" },
           job_ad: { type: "string", description: "Full job ad text" },
-          output_format: {
-            type: "string",
-            enum: ["markdown", "text"],
-            description: "Format for the tailored CV (default: markdown)",
-          },
         },
         required: ["company_name", "role_title", "job_ad"],
       },
@@ -367,7 +381,9 @@ export const promptTools = [
     definition: {
       name: "generate_cover_letter",
       annotations: { title: "Generate cover letter", readOnlyHint: true, openWorldHint: false },
-      description: "Generate a tailored cover letter for a job application.",
+      description:
+        "Draft a cover letter and/or answers to an application form's questions (pass them in application_questions), in the candidate's own voice. " +
+        "Show the drafts to the user; once they're happy, save each in the application's Google Doc as its own section (update_application_doc, e.g. 'Cover letter', 'Application answers'), never as separate files.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -385,6 +401,14 @@ export const promptTools = [
             type: "string",
             description: "Any specific points you want to make sure are included",
           },
+          application_questions: {
+            type: "string",
+            description: "Questions from the application form to draft answers for, one per line (optional). Include any word or character limits.",
+          },
+          skip_cover_letter: {
+            type: "boolean",
+            description: "true = only answer application_questions, no cover letter.",
+          },
         },
         required: ["company_name", "role_title", "job_ad"],
       },
@@ -401,7 +425,7 @@ export const promptTools = [
       name: "prep_interview",
       annotations: { title: "Prep interview", readOnlyHint: true, openWorldHint: true },
       description:
-        "Generate comprehensive interview preparation materials for a company and role, including likely questions, research points, and talking points from your CV. Automatically includes any existing notes from the application doc.",
+        "Generate comprehensive interview preparation materials for a company and role, including likely questions, research points, and talking points from your CV. Automatically includes any existing notes from the application doc. Show the prep to the user, then save it in the application's Google Doc (update_application_doc), never as a separate file.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {

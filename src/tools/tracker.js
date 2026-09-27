@@ -220,7 +220,7 @@ export const trackerTools = [
       name: "get_application_doc",
       annotations: { title: "Get application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
-        "Get the Google Doc linked to an application and return its full contents. If the user gives a doc link, pass it as doc_url to link and read it. If none is linked, use create_application_doc to make one, or ask the user for a doc URL.",
+        "Get the Google Doc linked to an application and return its full contents as markdown (sections, bullets, tables, code blocks). Read it before adding to or changing a doc so you don't duplicate a section; to change one, edit what you read and pass it to replace_doc_section. If the user gives a doc link, pass it as doc_url to link and read it. If none is linked, use create_application_doc to make one, or ask the user for a doc URL.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -275,7 +275,7 @@ export const trackerTools = [
       name: "update_application_doc",
       annotations: { title: "Update application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description:
-        "Append a section (heading + content) to the Google Doc linked to an application — interview stages, study notes, reflections, company research, etc. If no doc is linked yet, one is created automatically (owned by you) and linked, then the section is appended. You can also pass an existing doc's URL as doc_url to link it first. A section heading can only appear once per doc: to change an existing section, use replace_doc_section instead.",
+        "Append a section (heading + content) to the Google Doc linked to an application. The doc is the home for everything written about an application: company research, cover letter, application answers, interview prep, stages, reflections, study notes. Never save those as separate files. If no doc is linked yet, one is created automatically (owned by you) and linked, then the section is appended. You can also pass an existing doc's URL as doc_url to link it first. A section heading can only appear once per doc: to change an existing section, use replace_doc_section instead.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {

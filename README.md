@@ -21,7 +21,7 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 | `tailor_cv` | "Tailor my CV for this role" — writes a tailored copy of your CV into the application doc for you to review |
 | `save_tailored_cv` | Used by `tailor_cv`: saves the tailored CV JSON into the application doc |
 | `generate_cv_pdf` | "The Linear CV is approved, make the PDF" — builds the PDF from the approved CV in the doc (saved locally, or a temporary Drive copy on the hosted server) |
-| `generate_cover_letter` | "Write me a cover letter for Stripe" |
+| `generate_cover_letter` | "Write me a cover letter for Stripe" / "Answer these application questions" — drafts in your voice, saved to the application doc once you're happy |
 | `add_application` | "Add this to my tracker as Saved" |
 | `update_application` | "Mark Stripe as Interview" |
 | `get_applications` | "Show me my full pipeline" / "What am I currently interviewing for?" |
@@ -233,7 +233,9 @@ Without this, everything else still works — you just link docs manually as abo
 
 ### Step 6c: Tailored CVs and PDFs — optional
 
-Everything written for an application (research, tailored CV, cover letter, interview prep) goes into that application's doc, not into separate files.
+Everything written for an application (research, tailored CV, cover letter, application answers, interview prep) goes into that application's doc, not into separate files. The tool descriptions say so, so a new chat follows it without being told.
+
+**Your writing style.** Put how you want things written in a context file, e.g. `context/writing_style.md` (plain vs. formal, words to avoid, etc.). Every writing tool includes it and it overrides the tools' generic advice.
 
 If your CV is structured (a `.ts` or `.json` file, see `cv_file_path`), tailoring works like this:
 
