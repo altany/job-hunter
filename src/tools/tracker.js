@@ -422,6 +422,49 @@ export const trackerTools = [
     },
   },
   {
+    name: "format_doc",
+    definition: {
+      name: "format_doc",
+      annotations: { title: "Format doc", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      description:
+        "Apply Google Docs styling to the markup in an application's doc: markdown headings become real heading styles, and **bold**, *italic*, `code`, bullets, tables, horizontal rules and code blocks become the real thing. " +
+        "Styling only — no words are added, changed or removed. " +
+        "Writes made through this server are formatted already, so use this for a doc the user edited by hand, or after they fixed markup themselves. " +
+        "Pass doc_url for any doc, or company_name and role_title for a doc already linked to an application. " +
+        "It formats what is written: a heading written as '### Title' becomes Heading 3, so to change a heading's level, change the markup first.",
+      securitySchemes: [{ type: "noauth" }],
+      _meta: noauth,
+      inputSchema: {
+        type: "object",
+        properties: {
+          company_name: { type: "string" },
+          role_title: { type: "string" },
+          doc_url: { type: "string", description: "Google Doc URL to format (optional; use it instead of company_name and role_title). The doc must be shared with the service account as Editor." },
+        },
+        required: [],
+      },
+    },
+    handler: async (args, { sheets }) => {
+      let docUrl = args.doc_url;
+      if (!docUrl) {
+        if (!args.company_name || !args.role_title) {
+          return errorResult("Give me either a doc_url, or the company_name and role_title of an application with a doc linked. Nothing was changed.");
+        }
+        try { docUrl = await sheets.getDocUrl(args.company_name, args.role_title); }
+        catch (e) { return errorResult(`Couldn't look up the doc: ${e.message}`); }
+        if (!docUrl) {
+          return errorResult(`No doc is linked for "${args.role_title}" at ${args.company_name}. Nothing was changed.`);
+        }
+      }
+
+      const result = await sheets.formatDoc(docUrl);
+      if (!result.ok) {
+        return errorResult(`Formatting hit a problem: ${result.errors.join("; ")}\n${docUrl}`);
+      }
+      return textResult(`✅ Formatted the doc. Styling only, the text is unchanged.\n${docUrl}`);
+    },
+  },
+  {
     name: "replace_doc_section",
     definition: {
       name: "replace_doc_section",

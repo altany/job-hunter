@@ -29,6 +29,7 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 | `get_application_doc` | "Show me my Stripe notes" — reads the linked Google Doc for that application |
 | `update_application_doc` | "Add to my Stripe doc: 4 interview stages, take-home first" — appends a section (auto-creates the doc if none is linked) |
 | `replace_doc_section` | "Rewrite the Round 1 reflection in my Stripe doc" — replaces one section; shows a preview first and only writes once you confirm |
+| `format_doc` | "Format my Stripe doc" — applies Docs styling to the markup in a doc you edited by hand; styling only, the words are untouched |
 | `prep_interview` | "Prep me for my Stripe final round interview" |
 | `add_interview_note` | "Log that I passed the Stripe phone screen" |
 | `delete_application` | "Delete the duplicate Grafana entry" — removes a row from the tracker (e.g. a duplicate or mistake) |
@@ -204,7 +205,7 @@ Once linked (either way):
 - *"Add to my Stripe doc: their process is 4 rounds, starting with a take-home"* — appends a new section
 - *"Rewrite the Round 1 reflection in my Stripe doc: …"* — replaces that one section
 
-**Formatting.** The assistant writes plain markdown (`## Sub-heading`, `- bullets`, `**bold**`, tables, code blocks) and the server turns it into real Docs styling after every write. For a doc you edited by hand, you can run the same formatter yourself: `node scripts/format-doc-headings.js <docId>`.
+**Formatting.** The assistant writes plain markdown (`## Sub-heading`, `- bullets`, `**bold**`, tables, code blocks) and the server turns it into real Docs styling after every write. For a doc you edited by hand, ask for it: *"format my Stripe doc"* runs the same formatter through `format_doc`. You can also run it from the command line: `node scripts/format-doc-headings.js <docId>`. It formats what is written, so a heading typed as `### Title` becomes Heading 3 — to change a heading's level, change the markup first.
 
 **Correcting a section.** Each section heading appears once per doc: adding a section whose heading already exists is refused, and you're pointed to `replace_doc_section` instead. That tool:
 - replaces one section only (its heading plus everything up to the next heading of the same or higher level); if the heading matches no section or more than one, it changes nothing and lists the headings it found
@@ -639,7 +640,7 @@ These scripts live in `scripts/` and are run manually from the command line. The
 
 ### `format-doc-headings.js` — Format a Google Doc by hand
 
-The server formats a doc automatically after every write, so you only need this for a doc you edited yourself. It turns the markup below into real Google Docs styling, so the outline and navigation work.
+The server formats a doc automatically after every write, and the `format_doc` tool does the same from a chat. This script is the command-line version, useful for formatting several docs in one go. It turns the markup below into real Google Docs styling, so the outline and navigation work.
 
 **Run it:**
 ```bash
