@@ -8,16 +8,117 @@ import {
   normalizeContent,
   normalizeHeading,
   parseSections,
-  textInRange,
+  docToMarkdown,
   contentHeadingLevels,
   CONTENT_MARKUP_HELP,
 } from "../docSections.js";
 
 const noauth = { securitySchemes: [{ type: "noauth" }] };
 
-const textResult = (text) => ({ content: [{ type: "text", text }] });
-const errorResult = (text) => ({ content: [{ type: "text", text }], isError: true });
-const formatNote = (f) => (f && !f.ok ? `\n⚠️ Written, but formatting hit a problem: ${f.errors.join("; ")}` : "");
+export const textResult = (text) => ({ content: [{ type: "text", text }] });
+export const errorResult = (text) => ({ content: [{ type: "text", text }], isError: true });
+export const formatNote = (f) => (f && !f.ok ? `\n⚠️ Written, but formatting hit a problem: ${f.errors.join("; ")}` : "");
+
+/**
+ * Replace the body of exactly one section, with the safeguards every doc edit
+ * shares: single match or nothing, dry run unless confirm, the old text logged
+ * to "Doc edits" before the write, the write pinned to the revision read, and
+ * formatting afterwards. Used by replace_doc_section and save_tailored_cv.
+ */
+export async function replaceSection(sheets, { company, role, docUrl, heading, newContent, confirm, toolName }) {
+  // Read the doc and find exactly one matching section.
+  const locate = async () => {
+    const doc = await sheets.getDoc(docUrl);
+    const sections = parseSections(doc.content);
+    const wanted = normalizeHeading(heading);
+    const matches = sections.filter((sec) => sec.normalized === wanted);
+    return { doc, sections, matches };
+  };
+
+  let found;
+  try { found = await locate(); }
+  catch (e) { return errorResult(`Couldn't read the doc (${e.message}). Nothing was changed.`); }
+
+  const listHeadings = (sections) =>
+    sections.length
+      ? sections.map((sec) => `${"  ".repeat(Math.max(0, sec.level - 2))}- ${sec.text}`).join("\n")
+      : "(no headings found)";
+
+  if (found.matches.length !== 1) {
+    const why = found.matches.length === 0
+      ? `No section in the doc matches "${heading}".`
+      : `"${heading}" matches ${found.matches.length} sections, so I can't tell which one to replace.`;
+    return errorResult(`${why} Nothing was changed.\n\nHeadings in the doc:\n${listHeadings(found.sections)}`);
+  }
+
+  const section = found.matches[0];
+  // A top-level (Heading 1) heading usually spans the whole doc, which this
+  // tool must never replace.
+  if (section.level < 2) {
+    return errorResult(`"${section.text}" is a top-level heading that covers the whole doc, and this tool only replaces single sections. Nothing was changed.`);
+  }
+  const tooBig = contentHeadingLevels(newContent).filter((lvl) => lvl <= section.level);
+  if (tooBig.length) {
+    return errorResult(
+      `new_content contains a heading as big as (or bigger than) the section's own heading "${section.text}", ` +
+        "which would split the doc into extra sections. Use smaller sub-headings (e.g. ### or '-- Heading --'). Nothing was changed."
+    );
+  }
+
+  // Kept as markdown (fences, bullets, tables intact) so it can be pasted back.
+  const removedText = docToMarkdown(
+    found.doc.content.filter((el) => el.startIndex >= section.bodyStart && el.endIndex <= section.bodyEnd + 1)
+  );
+  const charsBefore = removedText.length;
+  const charsAfter = newContent.length;
+
+  if (!confirm) {
+    return textResult(
+      `DRY RUN — nothing has been changed.\n\n` +
+        `Section: "${section.text}"\n` +
+        `Would remove (${charsBefore} chars):\n----------\n${removedText || "(empty)"}\n----------\n\n` +
+        `Would replace it with (${charsAfter} chars):\n----------\n${newContent}\n----------\n\n` +
+        `To apply this, call ${toolName} again with the same arguments and confirm: true.`
+    );
+  }
+
+  // Log the old content first, so it's recoverable whatever happens next.
+  let logRow;
+  try {
+    logRow = await sheets.logDocEdit({
+      company: company,
+      role: role,
+      docUrl,
+      heading: section.text,
+      charsBefore,
+      charsAfter,
+      revisionBefore: found.doc.revisionId,
+      removedText,
+    });
+  } catch (e) {
+    return errorResult(`Couldn't write the edit log (${e.message}), so I didn't touch the doc. Nothing was changed.`);
+  }
+
+  try {
+    // Pinned to the revision we just read: if the doc changed since, Docs rejects it.
+    await sheets.replaceSectionBody(found.doc.docId, {
+      bodyStart: section.bodyStart,
+      bodyEnd: section.bodyEnd,
+      content: newContent,
+      revisionId: found.doc.revisionId,
+    });
+  } catch (e) {
+    await sheets.setDocEditResult(logRow, `failed: ${e.message}`).catch(() => {});
+    return errorResult(`Couldn't replace the section (${e.message}). Nothing was changed — if the doc was edited in the meantime, run the dry run again.`);
+  }
+
+  await sheets.setDocEditResult(logRow, "applied").catch(() => {});
+  const formatting = await sheets.formatDoc(docUrl);
+  return textResult(
+    `✅ Replaced the "${section.text}" section (${charsBefore} → ${charsAfter} chars). ` +
+      `The old text is saved in the tracker's "Doc edits" tab.${formatNote(formatting)}\n📄 ${docUrl}`
+  );
+}
 
 const STATUS_ENUM = [
   "Saved", "Applied", "Phone Screen", "Interview", "Offer", "Rejected", "Withdrawn",
@@ -365,95 +466,15 @@ export const trackerTools = [
         return errorResult("new_content is empty. This tool replaces a section's content; it doesn't clear sections. Nothing was changed.");
       }
 
-      // Read the doc and find exactly one matching section.
-      const locate = async () => {
-        const doc = await sheets.getDoc(docUrl);
-        const sections = parseSections(doc.content);
-        const wanted = normalizeHeading(args.heading);
-        const matches = sections.filter((sec) => sec.normalized === wanted);
-        return { doc, sections, matches };
-      };
-
-      let found;
-      try { found = await locate(); }
-      catch (e) { return errorResult(`Couldn't read the doc (${e.message}). Nothing was changed.`); }
-
-      const listHeadings = (sections) =>
-        sections.length
-          ? sections.map((sec) => `${"  ".repeat(Math.max(0, sec.level - 2))}- ${sec.text}`).join("\n")
-          : "(no headings found)";
-
-      if (found.matches.length !== 1) {
-        const why = found.matches.length === 0
-          ? `No section in the doc matches "${args.heading}".`
-          : `"${args.heading}" matches ${found.matches.length} sections, so I can't tell which one to replace.`;
-        return errorResult(`${why} Nothing was changed.\n\nHeadings in the doc:\n${listHeadings(found.sections)}`);
-      }
-
-      const section = found.matches[0];
-      // A top-level (Heading 1) heading usually spans the whole doc, which this
-      // tool must never replace.
-      if (section.level < 2) {
-        return errorResult(`"${section.text}" is a top-level heading that covers the whole doc, and this tool only replaces single sections. Nothing was changed.`);
-      }
-      const tooBig = contentHeadingLevels(newContent).filter((lvl) => lvl <= section.level);
-      if (tooBig.length) {
-        return errorResult(
-          `new_content contains a heading as big as (or bigger than) the section's own heading "${section.text}", ` +
-            "which would split the doc into extra sections. Use smaller sub-headings (e.g. ### or '-- Heading --'). Nothing was changed."
-        );
-      }
-
-      const removedText = textInRange(found.doc.content, section.bodyStart, section.bodyEnd);
-      const charsBefore = removedText.length;
-      const charsAfter = newContent.length;
-
-      if (!args.confirm) {
-        return textResult(
-          `DRY RUN — nothing has been changed.\n\n` +
-            `Section: "${section.text}"\n` +
-            `Would remove (${charsBefore} chars):\n----------\n${removedText || "(empty)"}\n----------\n\n` +
-            `Would replace it with (${charsAfter} chars):\n----------\n${newContent}\n----------\n\n` +
-            `To apply this, call replace_doc_section again with the same arguments and confirm: true.`
-        );
-      }
-
-      // Log the old content first, so it's recoverable whatever happens next.
-      let logRow;
-      try {
-        logRow = await sheets.logDocEdit({
-          company: args.company_name,
-          role: args.role_title,
-          docUrl,
-          heading: section.text,
-          charsBefore,
-          charsAfter,
-          revisionBefore: found.doc.revisionId,
-          removedText,
-        });
-      } catch (e) {
-        return errorResult(`Couldn't write the edit log (${e.message}), so I didn't touch the doc. Nothing was changed.`);
-      }
-
-      try {
-        // Pinned to the revision we just read: if the doc changed since, Docs rejects it.
-        await sheets.replaceSectionBody(found.doc.docId, {
-          bodyStart: section.bodyStart,
-          bodyEnd: section.bodyEnd,
-          content: newContent,
-          revisionId: found.doc.revisionId,
-        });
-      } catch (e) {
-        await sheets.setDocEditResult(logRow, `failed: ${e.message}`).catch(() => {});
-        return errorResult(`Couldn't replace the section (${e.message}). Nothing was changed — if the doc was edited in the meantime, run the dry run again.`);
-      }
-
-      await sheets.setDocEditResult(logRow, "applied").catch(() => {});
-      const formatting = await sheets.formatDoc(docUrl);
-      return textResult(
-        `✅ Replaced the "${section.text}" section (${charsBefore} → ${charsAfter} chars). ` +
-          `The old text is saved in the tracker's "Doc edits" tab.${formatNote(formatting)}\n📄 ${docUrl}`
-      );
+      return replaceSection(sheets, {
+        company: args.company_name,
+        role: args.role_title,
+        docUrl,
+        heading: args.heading,
+        newContent,
+        confirm: args.confirm,
+        toolName: "replace_doc_section",
+      });
     },
   },
   {

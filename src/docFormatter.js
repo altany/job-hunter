@@ -924,6 +924,33 @@ export function createFormatter(rawDocs, log = () => {}) {
    * Returns array of { fenceStartIndex, fenceEndIndex, contentEls }
    * where fenceStart/End are the ``` paragraphs and contentEls are between them.
    */
+  function isFence(text) {
+    return /^```[\w-]*$/.test(text);
+  }
+
+  function isCodeStyled(el) {
+    const runs = (el.paragraph?.elements || []).filter((e) => e.textRun?.content?.trim());
+    return runs.length > 0 && runs.every((e) => e.textRun.textStyle?.weightedFontFamily?.fontFamily === "Courier New");
+  }
+
+  /**
+   * Code must reach the page exactly as written (JSON, snippets), so the
+   * heading / inline / table / bullet / rule passes get a copy of the body in
+   * which code paragraphs look empty: both fenced blocks not yet styled and
+   * blocks styled by an earlier run (Courier New).
+   */
+  function hideCode(body) {
+    let inFence = false;
+    return body.map((el) => {
+      if (!el.paragraph) return el;
+      const text = paraText(el).trim();
+      let hide = inFence || isCodeStyled(el);
+      if (inFence && text === "```") inFence = false;
+      else if (!inFence && isFence(text)) { inFence = true; hide = true; }
+      return hide ? { ...el, paragraph: { ...el.paragraph, elements: [] } } : el;
+    });
+  }
+
   function findCodeBlocks(body) {
     const blocks = [];
     let i = 0;
@@ -933,7 +960,7 @@ export function createFormatter(rawDocs, log = () => {}) {
       if (!el.paragraph) { i++; continue; }
       const text = paraText(el).trim();
 
-      if (text === "```") {
+      if (isFence(text)) {
         // Find closing fence
         let j = i + 1;
         const contentEls = [];
@@ -1039,7 +1066,7 @@ export function createFormatter(rawDocs, log = () => {}) {
     let res = await docs.documents.get({ documentId: docId });
 
     // ── 1. Headings ──────────────────────────────
-    const headings = findHeadings(res.data.body.content);
+    const headings = findHeadings(hideCode(res.data.body.content));
 
     if (headings.length === 0) {
       log(("  ✅ No ASCII headings found.") + "\n");
@@ -1069,7 +1096,7 @@ export function createFormatter(rawDocs, log = () => {}) {
     // ── 2. Inline markdown ───────────────────────
     // Re-fetch after heading changes (indices may have shifted)
     res = await docs.documents.get({ documentId: docId });
-    const markdownParas = findInlineMarkdown(res.data.body.content);
+    const markdownParas = findInlineMarkdown(hideCode(res.data.body.content));
 
     if (markdownParas.length === 0) {
       log(("  ✅ No inline markdown found.") + "\n");
@@ -1100,7 +1127,7 @@ export function createFormatter(rawDocs, log = () => {}) {
     // ── 3. Markdown tables → real Google Docs tables ──
     // Re-fetch after markdown changes (indices may have shifted)
     res = await docs.documents.get({ documentId: docId });
-    const mdTables = findMarkdownTables(res.data.body.content);
+    const mdTables = findMarkdownTables(hideCode(res.data.body.content));
 
     if (mdTables.length === 0) {
       log(("  ✅ No markdown tables found.") + "\n");
@@ -1126,7 +1153,7 @@ export function createFormatter(rawDocs, log = () => {}) {
 
     // ── 4. Bullet lists (- item) ────────────────
     res = await docs.documents.get({ documentId: docId });
-    const bulletGroups = findBulletGroups(res.data.body.content);
+    const bulletGroups = findBulletGroups(hideCode(res.data.body.content));
 
     if (bulletGroups.length === 0) {
       log(("  ✅ No bullet lists found.") + "\n");
@@ -1149,7 +1176,7 @@ export function createFormatter(rawDocs, log = () => {}) {
 
     // ── 5. Horizontal rules (---) ───────────────
     res = await docs.documents.get({ documentId: docId });
-    const hrules = findHorizontalRules(res.data.body.content);
+    const hrules = findHorizontalRules(hideCode(res.data.body.content));
 
     if (hrules.length === 0) {
       log(("  ✅ No horizontal rules found.") + "\n");

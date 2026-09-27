@@ -9,6 +9,8 @@
  * here, so this source is safe to publish.
  */
 
+import { CV_TYPE } from "../cvSchema.js";
+
 function rateJob(args, cvText, preferences, contextFiles) {
   return `
 You are a career coach helping evaluate a job opportunity for a candidate who is actively interviewing.
@@ -143,8 +145,10 @@ What to expect based on research: stages, format, timeline, live coding risk, an
 `.trim();
 }
 
-function tailorCV(args, cvText, preferences, contextFiles) {
-  return `
+function tailorCV(args, cvText, preferences, contextFiles, cvJson) {
+  // No structured CV (e.g. a PDF CV): tailor as text, still saved in the doc.
+  if (!cvJson) {
+    return `
 You are an expert CV writer. Tailor the candidate's CV for the specific role below.
 
 ## Original CV
@@ -165,13 +169,47 @@ ${args.job_ad}
 ## Instructions
 - Reorder and reframe experience to best match the job requirements
 - Adjust bullet points to use language from the job ad where authentic
-- Highlight the most relevant skills and achievements
 - Keep all facts truthful — do not invent experience
 - Maintain the same overall structure but optimise emphasis
-- Output in ${args.output_format || "markdown"} format
-- Add a brief note at the top explaining the key tailoring decisions you made
+- Save the result in the application's Google Doc with update_application_doc (heading "Tailored CV"), or replace_doc_section if that section already exists. Don't create separate files.
+- Then tell the user in 2-3 lines what you changed and that the full CV is in the doc.
+`.trim();
+  }
 
-Output the full tailored CV.
+  return `
+Tailor the candidate's CV for the role below. The CV is structured data that the candidate's own script turns into a PDF, so the result must keep exactly the same JSON shape.
+
+## Base CV (JSON)
+${JSON.stringify(cvJson, null, 2)}
+
+## Required shape (TypeScript)
+${CV_TYPE}
+
+## Candidate Preferences & Context
+${JSON.stringify(preferences, null, 2)}
+
+${contextFiles}
+
+## Target Role
+Company: ${args.company_name}
+Role: ${args.role_title}
+
+## Job Ad
+${args.job_ad}
+
+## Rules
+- Every fact stays true. You can reword, reorder, shorten and change emphasis. Never invent experience, employers, dates, numbers or skills.
+- Same shape: same keys, no new fields, no missing required fields. header.name, header.email and header.website stay exactly as they are; header.title can be adjusted to the role.
+- Keep every role in "experience", in the same date order. Within a role you can rewrite the summary and reorder, rewrite or drop bullets.
+- Keep the length about the same (similar number of bullets and strengths) so it still fits the PDF layout.
+- Write plainly, in the candidate's own voice. No buzzwords or clever phrasing.
+- Values are plain text: no markdown (**, _, backticks) and no leading dashes, because the PDF shows them literally.
+
+## What to do
+1. Produce the tailored CV as JSON.
+2. Save it with save_tailored_cv: cv_json = the JSON object, notes = 3-6 short bullets on what you changed and why. It goes into the application's Google Doc under "Tailored CV". Don't create files and don't paste the full JSON in chat.
+3. Tell the user in 2-3 lines what you changed, and that they can review and edit the JSON in the doc. The doc version is the one that becomes the PDF.
+4. Only when the user says the CV is approved, call generate_cv_pdf.
 `.trim();
 }
 
@@ -206,7 +244,7 @@ Write a compelling, ${args.tone || "conversational"} cover letter that:
 - Is 3-4 paragraphs, under 400 words
 - Ends with a confident, clear call to action
 
-Output the cover letter ready to send (no placeholders).
+Output the cover letter ready to send (no placeholders). Show it to the user; once they're happy with it, save it in the application's Google Doc with update_application_doc (heading "Cover letter"), or replace_doc_section if that section already exists. Don't create separate files.
 `.trim();
 }
 
@@ -263,6 +301,8 @@ List 8-10 likely questions for a ${args.interview_type} interview, with guidance
 
 ### ⚡ Quick Tips
 3-5 tactical tips specific to this interview type and company.
+
+Show the prep to the user, then save it in the application's Google Doc with update_application_doc (a heading like "Interview prep — phone screen"). Don't create separate files.
 `.trim();
 }
 
@@ -300,7 +340,7 @@ export const promptTools = [
       name: "tailor_cv",
       annotations: { title: "Tailor CV", readOnlyHint: true, openWorldHint: false },
       description:
-        "Generate a tailored CV for a specific job application, highlighting the most relevant experience and skills.",
+        "Tailor the CV for a specific job application. Returns instructions to produce a tailored CV in the same structure as the base CV and save it in the application's Google Doc (via save_tailored_cv) for the user to review; the PDF is made later with generate_cv_pdf once they approve it.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -318,8 +358,8 @@ export const promptTools = [
         required: ["company_name", "role_title", "job_ad"],
       },
     },
-    handler: async (args, { cvText, preferences, contextFiles }) => ({
-      content: [{ type: "text", text: tailorCV(args, cvText, preferences, contextFiles) }],
+    handler: async (args, { cvText, cvJson, preferences, contextFiles }) => ({
+      content: [{ type: "text", text: tailorCV(args, cvText, preferences, contextFiles, cvJson) }],
     }),
   },
   {

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * pack-config — bundle local config + CV + context into the single JSON blob
- * that the hosted (HTTP) server reads from JOB_HUNTER_CONFIG_JSON.
+ * that the hosted (HTTP) server reads from JOB_HUNTER_CONFIG_JSON. A structured
+ * CV (.ts / .json) is also inlined as `cv_json` so tailor_cv works remotely.
  *
  * It reads config.json + the CV file + context/*.md from disk, inlines the CV
  * (`cv_text`) and context (`context_text`), and strips the local-only key-file
@@ -21,13 +22,14 @@ import { loadCV } from "../src/cv.js";
 import { loadContextFiles } from "../src/createServer.js";
 
 const config = loadConfig();
-const { cvText } = await loadCV(config);
+const { cvText, cvJson } = await loadCV(config);
 const contextText = loadContextFiles(config);
 
 const hosted = {
   ...config,
   google_sheets: { ...config.google_sheets },
   cv_text: cvText,
+  ...(cvJson ? { cv_json: cvJson } : {}),
   context_text: contextText,
 };
 delete hosted.cv_file_path; // CV is inlined as cv_text

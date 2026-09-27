@@ -93,24 +93,6 @@ export function parseSections(content) {
   });
 }
 
-/** Plain text of everything in [start, end) — used for previews and the edit log. */
-export function textInRange(content, start, end) {
-  const out = [];
-  for (const el of content) {
-    if (el.startIndex == null || el.startIndex < start || el.endIndex > end + 1) continue;
-    if (el.paragraph) out.push(paraText(el));
-    else if (el.table) {
-      for (const row of el.table.tableRows || []) {
-        const cells = (row.tableCells || []).map((c) =>
-          (c.content || []).map(paraText).join(" ").trim()
-        );
-        out.push(`| ${cells.join(" | ")} |`);
-      }
-    }
-  }
-  return out.join("\n").trim();
-}
-
 /**
  * Make model-written content safe to drop into a section: top-level markup
  * (━━━ blocks, # H1, #### and deeper) is mapped to levels the section can hold,
@@ -167,10 +149,26 @@ function runsToMarkdown(elements) {
     .replace(/\n$/, "");
 }
 
+// Code blocks are styled Courier New by the formatter (fences removed).
+export function isCodeParagraph(el) {
+  const runs = (el.paragraph?.elements || []).filter((e) => e.textRun?.content?.trim());
+  return runs.length > 0 && runs.every((e) => e.textRun.textStyle?.weightedFontFamily?.fontFamily === "Courier New");
+}
+
 /** Render a Docs body as the markdown the write tools accept. */
 export function docToMarkdown(content) {
   const out = [];
+  let inCode = false;
   for (const el of content) {
+    const code = !!el.paragraph && isCodeParagraph(el);
+    if (code !== inCode) {
+      out.push("```");
+      inCode = code;
+    }
+    if (code) {
+      out.push(paraText(el));
+      continue;
+    }
     if (el.table) {
       (el.table.tableRows || []).forEach((row, i) => {
         const cells = (row.tableCells || []).map((c) =>
@@ -196,5 +194,6 @@ export function docToMarkdown(content) {
       out.push(text);
     }
   }
+  if (inCode) out.push("```");
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }

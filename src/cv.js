@@ -4,8 +4,9 @@ import path from "path";
 export async function loadCV(config) {
   // Hosted deploys can supply the CV inline (config.cv_text) so no file is
   // needed on disk. Local stdio use keeps reading from cv_file_path.
+  // cv_json (structured CV, from pack-config) lets hosted deploys tailor CVs too.
   if (config.cv_text && config.cv_text.trim()) {
-    return { cvText: config.cv_text };
+    return { cvText: config.cv_text, cvJson: config.cv_json || null };
   }
 
   const cvPath = config.cv_file_path;
@@ -16,6 +17,7 @@ export async function loadCV(config) {
 
   const ext = path.extname(cvPath).toLowerCase();
   let cvText = "";
+  let cvJson = null;
 
   if (ext === ".pdf") {
     const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
@@ -30,16 +32,18 @@ export async function loadCV(config) {
     cvText = fs.readFileSync(cvPath, "utf8");
   } else if (ext === ".json") {
     const raw = JSON.parse(fs.readFileSync(cvPath, "utf8"));
+    cvJson = raw;
     cvText = formatStructuredCV(raw, config);
   } else if (ext === ".ts" || ext === ".js") {
     const raw = fs.readFileSync(cvPath, "utf8");
     const cv = parseTypeScriptCV(raw);
+    if (!cv._raw) cvJson = resolveInObject(cv, config.cv_constants || {});
     cvText = formatStructuredCV(cv, config);
   } else {
     throw new Error(`Unsupported CV format: ${ext}. Supported: .pdf, .docx, .txt, .md, .json, .ts`);
   }
 
-  return { cvText };
+  return { cvText, cvJson };
 }
 
 export function loadPreferences(config) {

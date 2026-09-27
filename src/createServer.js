@@ -42,12 +42,14 @@ export function loadContextFiles(config = {}) {
 const INSTRUCTIONS = `
 This server is a personal job-search tracker backed by Google Sheets (one row per application) and, optionally, one Google Doc per application for long-form notes.
 
-Typical flow: rate_job (research + score a role) → add_application (save it) → update_application (keep it current as it progresses) → create_application_doc / get_application_doc / update_application_doc / replace_doc_section (long-form notes) → prep_interview (before a call).
+Typical flow: rate_job (research + score a role) → add_application (save it) → update_application (keep it current as it progresses) → create_application_doc / get_application_doc / update_application_doc / replace_doc_section (long-form notes) → tailor_cv / save_tailored_cv / generate_cv_pdf → prep_interview (before a call).
 
 Rules that avoid the common mistakes:
 - To change ANYTHING about an application that is already in the tracker — status, rating, notes, next step, salary, work type, location, or a linked doc — use update_application. Do NOT use add_application for a company that already exists; that creates a duplicate row. add_application is only for a company/role not yet tracked.
 - Applications are matched leniently by company + role. If update_application says it can't find the row, call get_applications to see the exact company/role text, then retry with that (or use delete_application to remove a duplicate).
 - Each application can have one linked Google Doc for long-form notes. Use create_application_doc to make one (it's created automatically, owned by the user), get_application_doc to read it, and update_application_doc to append a section (it auto-creates the doc if none is linked yet). The user can also paste an existing doc's link as doc_url. There is one doc per application — the tools won't create a duplicate if one is already linked. Each section heading appears once per doc: to correct or rewrite an existing section, use replace_doc_section (dry run first, show the user the preview, then confirm: true), never update_application_doc. Doc content is plain markdown and is styled automatically after every write. (If doc creation ever errors that OAuth isn't set up, the user needs to run 'npm run auth' once; a service account alone can't create Docs.)
+- Everything written for an application (research, tailored CV, cover letter, answers to application questions, interview prep) goes into that application's Google Doc through these tools. Never save it as separate files.
+- Tailored CVs: tailor_cv → save_tailored_cv (JSON into the doc) → the user reviews and edits it in the doc → generate_cv_pdf, only after the user approves. The doc's JSON is the approved version; the base CV file is never edited per application.
 - rate_job, tailor_cv, generate_cover_letter and prep_interview return an instruction prompt for you to carry out. They already include the user's CV, preferences and background, so don't ask the user for those.
 - Tracker notes are appended, never overwritten. Statuses: Saved, Applied, Phone Screen, Interview, Offer, Rejected, Withdrawn.
 `.trim();
@@ -65,7 +67,7 @@ export function createServer() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const config = loadConfig();
     const sheets = new GoogleSheetsClient(config);
-    const { cvText } = await loadCV(config);
+    const { cvText, cvJson } = await loadCV(config);
     const preferences = loadPreferences(config);
     const contextFiles = loadContextFiles(config);
 
@@ -80,7 +82,7 @@ export function createServer() {
     }
 
     try {
-      return await tool.handler(args, { config, sheets, cvText, preferences, contextFiles });
+      return await tool.handler(args, { config, sheets, cvText, cvJson, preferences, contextFiles });
     } catch (err) {
       return {
         content: [{ type: "text", text: `❌ Error: ${err.message}` }],

@@ -18,7 +18,9 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 | Tool | What you say |
 |------|-------------|
 | `rate_job` | "Rate this job ad" — researches the company, checks salary, scores against your CV and preferences |
-| `tailor_cv` | "Tailor my CV for this role" |
+| `tailor_cv` | "Tailor my CV for this role" — writes a tailored copy of your CV into the application doc for you to review |
+| `save_tailored_cv` | Used by `tailor_cv`: saves the tailored CV JSON into the application doc |
+| `generate_cv_pdf` | "The Linear CV is approved, make the PDF" — builds the PDF from the approved CV in the doc (local server only) |
 | `generate_cover_letter` | "Write me a cover letter for Stripe" |
 | `add_application` | "Add this to my tracker as Saved" |
 | `update_application` | "Mark Stripe as Interview" |
@@ -228,6 +230,18 @@ A service account can't create Docs (it has no Drive storage quota), so auto-cre
 5. Optional: set `google_sheets.docs_folder_id` to a Drive folder for new docs (otherwise they go to a folder named "Job Hunter MCP" if it exists, else your Drive root).
 
 Without this, everything else still works — you just link docs manually as above.
+
+### Step 6c: Tailored CVs and PDFs — optional
+
+Everything written for an application (research, tailored CV, cover letter, interview prep) goes into that application's doc, not into separate files.
+
+If your CV is structured (a `.ts` or `.json` file, see `cv_file_path`), tailoring works like this:
+
+1. *"Tailor my CV for the Linear role"* — the assistant writes a tailored copy with exactly the same structure as your CV and saves it as JSON in the application doc, under **Tailored CV**, with a few notes on what it changed. Your base CV file is never changed.
+2. You review and edit the JSON in the doc. **The doc's version is the approved one**, so edit it there, not in your CV file.
+3. *"The Linear CV is approved, make the PDF"* — `generate_cv_pdf` reads the JSON from the doc, checks its structure, and runs your CV repo's PDF script with it. The PDF lands in `~/Downloads` (or `cv_pdf.output_dir`). Your name, email and website always come from your base CV.
+
+The PDF step runs your own script, so it only works on the local server, on the computer that has your CV repo. It expects a repo with `scripts/generate-cv-pdf.tsx` that accepts `--json <file> --out <file>`. The repo is found from `cv_file_path` when that points to `<repo>/src/cv/cv.ts`, or set `cv_pdf.repo_path`. For the hosted server, re-run `npm run pack-config` so it includes your structured CV (`cv_json`) and can tailor it too.
 
 ---
 
@@ -709,12 +723,16 @@ job-hunter/
 │   ├── config.js         # Config + secret resolution (env or config.json)
 │   ├── sheets.js         # Google Sheets + Docs read/write
 │   ├── cv.js             # CV loading (PDF, DOCX, MD, TXT, TS, JSON)
+│   ├── cvSchema.js       # Structured CV shape + validation for tailored CVs
+│   ├── docFormatter.js   # Turns doc markup into Docs styling (runs after every write)
+│   ├── docSections.js    # Doc sections, markup rules, doc → markdown
 │   └── tools/
 │       ├── index.js      # Tool registry — add new tools here
 │       ├── prompts.js    # rate_job, tailor_cv, generate_cover_letter, prep_interview
-│       └── tracker.js    # add/update/get applications + docs + notes
+│       ├── tracker.js    # add/update/get applications + docs + notes
+│       └── cvTools.js    # save_tailored_cv, generate_cv_pdf
 ├── scripts/
-│   ├── format-doc-headings.js    # Convert ASCII headings to Google Doc styles
+│   ├── format-doc-headings.js    # Format a doc by hand (the server does it after every write)
 │   ├── format-sheet-status.js    # Style and sort the Applications sheet
 │   ├── pack-config.js            # Bundle config + CV + context for the host (npm run pack-config)
 │   └── oauth-setup.js            # One-time OAuth flow for auto-creating Docs (npm run auth)
