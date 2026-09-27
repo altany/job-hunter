@@ -418,6 +418,8 @@ The transport is chosen with the `MCP_TRANSPORT` environment variable:
 
 Both share the exact same tool logic in [`src/createServer.js`](src/createServer.js).
 
+The HTTP transport is stateless: every request is handled on its own, with no session to lose. Restarts (deploys, a free host waking from sleep) are invisible to connected clients.
+
 ### Environment variables (HTTP mode)
 
 | Variable | Required | Purpose |
@@ -623,7 +625,9 @@ Try these in Claude Desktop after restarting:
 
 **Claude can't find the tools** — Check that the path in `claude_desktop_config.json` is correct and absolute. Test by running `node /path/to/src/index.js` directly in Terminal — if it hangs (waits for input), it's working. If it throws an error, check your config.json.
 
-**Changes not taking effect** — Always fully quit and restart Claude Desktop after changing `claude_desktop_config.json` or `config.json`.
+**Changes not taking effect** — Always fully quit and restart Claude Desktop after changing `claude_desktop_config.json` or `config.json`. For the hosted server, changes to `config.json`, your CV or `context/*.md` only reach it after you re-run `npm run pack-config` and update `JOB_HUNTER_CONFIG_JSON`.
+
+**The assistant doesn't see a new or changed tool** — Clients cache the tool list for a chat. After updating the server, disconnect and reconnect the connector, or start a new chat.
 
 ---
 
@@ -633,9 +637,9 @@ These scripts live in `scripts/` and are run manually from the command line. The
 
 ---
 
-### `format-doc-headings.js` — Format Google Doc headings
+### `format-doc-headings.js` — Format a Google Doc by hand
 
-Converts ASCII-style section dividers in an application doc into proper Google Doc heading styles (H2–H5), so the document outline and navigation work correctly.
+The server formats a doc automatically after every write, so you only need this for a doc you edited yourself. It turns the markup below into real Google Docs styling, so the outline and navigation work.
 
 **Run it:**
 ```bash
@@ -656,14 +660,19 @@ for id in <docId1> <docId2> <docId3>; do node scripts/format-doc-headings.js $id
 
 **What it converts:**
 
-| Format in doc | Becomes |
+| Markup in doc | Becomes |
 |---------------|---------|
-| Long `━━━` line / TEXT / long `━━━` line | Heading 2 |
-| Short `━━━` line / TEXT / short `━━━` line | Heading 3 |
-| `--- TEXT ---` | Heading 4 |
+| Long `━━━` line / TEXT / long `━━━` line (section headings the server adds) | Heading 2 |
+| Short `━━━` line / TEXT / short `━━━` line, or `## TEXT` | Heading 3 |
+| `### TEXT` or `--- TEXT ---` | Heading 4 |
 | `-- TEXT --` | Heading 5 |
+| `- item` | Bullet list |
+| `\| a \| b \|` rows | Table |
+| ```` ``` ```` fenced block | Code block (contents left exactly as written) |
+| a line with just `---` | Horizontal rule |
+| `**bold**`, `_italic_`, `` `code` ``, `~~strike~~` | Inline styles |
 
-**Nothing to change** — the script reads credentials from `config.json` automatically.
+Re-running it only touches markup that hasn't been formatted yet. **Nothing to change** — the script reads credentials from `config.json` automatically.
 
 ---
 
