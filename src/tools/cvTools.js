@@ -5,19 +5,18 @@
  *
  * The base CV (cv_file_path, e.g. a site's cv.ts) is never changed per
  * application. The JSON in the application doc's "Tailored CV" section is the
- * approved version for that application, and it's what the PDF is built from.
+ * approved version for that application, and it's what the PDF is built from
+ * (see cvRenderer.js for where the rendering code comes from).
  */
 
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { normalizeContent, normalizeHeading, parseSections, docToMarkdown } from "../docSections.js";
 import { TAILORED_CV_HEADING, validateCv, extractCvJson, parseCvArg } from "../cvSchema.js";
 import { replaceSection, textResult, errorResult, formatNote } from "./tracker.js";
+import { resolveCvRenderer, renderCvPdf } from "../cvRenderer.js";
 
-const run = promisify(execFile);
 const noauth = { securitySchemes: [{ type: "noauth" }] };
 
 function findTailoredSection(content) {
@@ -30,14 +29,6 @@ function withBaseContact(cv, base) {
   if (!base?.header) return cv;
   const { name, email, website } = base.header;
   return { ...cv, header: { ...cv.header, name, email, ...(website ? { website } : {}) } };
-}
-
-// Where the CV repo lives: cv_pdf.repo_path, or derived from a cv_file_path
-// of the form <repo>/src/cv/cv.ts.
-function cvRepoPath(config) {
-  if (config.cv_pdf?.repo_path) return config.cv_pdf.repo_path;
-  const m = String(config.cv_file_path || "").match(/^(.*)\/src\/cv\/cv\.(ts|js|json)$/);
-  return m ? m[1] : null;
 }
 
 const expandHome = (p) => (p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p);
@@ -136,7 +127,8 @@ export const cvTools = [
       annotations: { title: "Generate CV PDF", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
         "Build the PDF of an application's tailored CV from the JSON in its doc's 'Tailored CV' section (including any edits the user made there), using the user's own CV PDF script. " +
-        "Only call this after the user has said the tailored CV in the doc is approved. Runs on the local server only (it needs the CV repo on the user's computer).",
+        "The PDF is uploaded to the user's Drive next to the application docs (and, on the local server, also saved to their computer). " +
+        "Only call this after the user has said the tailored CV in the doc is approved.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -149,19 +141,9 @@ export const cvTools = [
       },
     },
     handler: async (args, { sheets, config, cvJson }) => {
-      const repo = cvRepoPath(config);
-      const script = repo && path.join(repo, "scripts", "generate-cv-pdf.tsx");
-      if (!script || !fs.existsSync(script)) {
-        return errorResult(
-          "PDF generation only works on the local job-hunter server, on the computer that has the CV repo (set cv_pdf.repo_path in config.json). " +
-            "The hosted server can't run it. The approved JSON is safe in the doc; generate the PDF from the local connector."
-        );
-      }
-
-      // An older script ignores --json and would overwrite the site's own CV PDF.
-      if (!fs.readFileSync(script, "utf8").includes('arg("json")')) {
-        return errorResult(`The CV script in ${repo} doesn't support --json yet. Pull the latest version of that repo, then try again. No PDF was made.`);
-      }
+      let renderer;
+      try { renderer = await resolveCvRenderer(config); }
+      catch (e) { return errorResult(`Can't make the PDF: ${e.message}. No PDF was made.`); }
 
       const docUrl = await sheets.getDocUrl(args.company_name, args.role_title);
       if (!docUrl) return errorResult(`No doc is linked for "${args.role_title}" at ${args.company_name}.`);
@@ -184,29 +166,34 @@ export const cvTools = [
         return errorResult(`The CV in the doc doesn't match the base CV's shape (maybe an edit removed or renamed something). No PDF was made.\n- ${problems.join("\n- ")}`);
       }
 
-      const outDir = expandHome(config.cv_pdf?.output_dir || "~/Downloads");
-      const name = slug(cv.header.name || "CV");
-      const outPath = path.join(outDir, `${name}-CV-${slug(args.company_name)}.pdf`);
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "tailored-cv-"));
-      const jsonPath = path.join(tmpDir, "cv.json");
-      fs.writeFileSync(jsonPath, JSON.stringify(cv));
+      // Locally the PDF goes to output_dir; either way it's uploaded to Drive,
+      // next to the application docs, so it can be opened from anywhere.
+      const fileName = `${slug(cv.header.name || "CV")}-CV-${slug(args.company_name)}.pdf`;
+      const local = renderer.source === "local";
+      const outDir = local
+        ? expandHome(config.cv_pdf?.output_dir || "~/Downloads")
+        : fs.mkdtempSync(path.join(os.tmpdir(), "cv-pdf-"));
+      const outPath = path.join(outDir, fileName);
 
-      const tsx = path.join(repo, "node_modules", "tsx", "dist", "cli.mjs");
       try {
-        await run(
-          fs.existsSync(tsx) ? process.execPath : "npx",
-          [...(fs.existsSync(tsx) ? [tsx] : ["tsx"]), "scripts/generate-cv-pdf.tsx", "--json", jsonPath, "--out", outPath],
-          { cwd: repo, timeout: 120000 }
-        );
-      } catch (e) {
-        const detail = (e.stderr || e.message || "").split("\n").filter((l) => /error/i.test(l)).slice(0, 3).join(" ") || e.message;
-        return errorResult(`The CV PDF script failed: ${detail}`);
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
+        await renderCvPdf(renderer, cv, outPath);
+        let driveLink = null;
+        let driveError = null;
+        try { driveLink = await sheets.uploadPdf(outPath, fileName); }
+        catch (e) { driveError = e.message; }
 
-      if (!fs.existsSync(outPath)) return errorResult("The CV PDF script ran but didn't produce a file.");
-      return textResult(`✅ PDF ready: ${outPath}\nBuilt from the Tailored CV section of the doc: ${docUrl}`);
+        if (!local && !driveLink) return errorResult(`The PDF was made but couldn't be uploaded to Drive (${driveError}).`);
+        const lines = ["✅ CV PDF ready, built from the Tailored CV section of the doc."];
+        if (local) lines.push(`On this computer: ${outPath}`);
+        if (driveLink) lines.push(`In Drive: ${driveLink}`);
+        else lines.push(`⚠️ Not uploaded to Drive: ${driveError}`);
+        lines.push(`📄 ${docUrl}`);
+        return textResult(lines.join("\n"));
+      } catch (e) {
+        return errorResult(`Couldn't make the PDF: ${e.message}.`);
+      } finally {
+        if (!local) fs.rmSync(outDir, { recursive: true, force: true });
+      }
     },
   },
 ];

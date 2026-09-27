@@ -22,3 +22,6 @@ context/
 
 # OS
 .DS_Store
+
+# Downloaded CV renderer (hosted generate_cv_pdf)
+.cv-renderer/

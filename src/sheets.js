@@ -405,15 +405,7 @@ export class GoogleSheetsClient {
     const docUrl = `https://docs.google.com/document/d/${docId}/edit`;
 
     // 2. Move it into the applications folder (configured id, else found by name).
-    let folderId = this.docsFolderId;
-    if (!folderId && this.docsFolderName) {
-      const res = await this.oauthDrive.files.list({
-        q: `name='${this.docsFolderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-        fields: "files(id)",
-        spaces: "drive",
-      });
-      folderId = res.data.files?.[0]?.id || null;
-    }
+    const folderId = await this._appFolderId();
     if (folderId) {
       const fileRes = await this.oauthDrive.files.get({ fileId: docId, fields: "parents" });
       const previousParents = fileRes.data.parents?.join(",") || "";
@@ -566,6 +558,41 @@ export class GoogleSheetsClient {
       valueInputOption: "RAW",
       requestBody: { values: [[result]] },
     });
+  }
+
+  // The Drive folder application files go in: configured id, else found by name.
+  async _appFolderId() {
+    if (this.docsFolderId) return this.docsFolderId;
+    if (!this.docsFolderName || !this.oauthDrive) return null;
+    const res = await this.oauthDrive.files.list({
+      q: `name='${this.docsFolderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: "files(id)",
+      spaces: "drive",
+    });
+    return res.data.files?.[0]?.id || null;
+  }
+
+  // Upload a PDF to the applications folder as the user; a file with the same
+  // name there is updated in place rather than duplicated. Returns its link.
+  async uploadPdf(filePath, name) {
+    if (!this.oauthDrive) throw new Error("OAuth isn't set up (run 'npm run auth'), so I can't upload to your Drive");
+    const folderId = await this._appFolderId();
+    const escaped = name.replace(/'/g, "\\'");
+    const existing = await this.oauthDrive.files.list({
+      q: `name='${escaped}' and trashed=false${folderId ? ` and '${folderId}' in parents` : ""}`,
+      fields: "files(id)",
+      spaces: "drive",
+    });
+    const media = { mimeType: "application/pdf", body: fs.createReadStream(filePath) };
+    const id = existing.data.files?.[0]?.id;
+    const res = id
+      ? await this.oauthDrive.files.update({ fileId: id, media, fields: "id, webViewLink" })
+      : await this.oauthDrive.files.create({
+          requestBody: { name, mimeType: "application/pdf", ...(folderId ? { parents: [folderId] } : {}) },
+          media,
+          fields: "id, webViewLink",
+        });
+    return res.data.webViewLink;
   }
 
   // Get the doc URL stored for an application

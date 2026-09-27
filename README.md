@@ -20,7 +20,7 @@ Once set up, you interact with it through natural language in Claude or ChatGPT.
 | `rate_job` | "Rate this job ad" — researches the company, checks salary, scores against your CV and preferences |
 | `tailor_cv` | "Tailor my CV for this role" — writes a tailored copy of your CV into the application doc for you to review |
 | `save_tailored_cv` | Used by `tailor_cv`: saves the tailored CV JSON into the application doc |
-| `generate_cv_pdf` | "The Linear CV is approved, make the PDF" — builds the PDF from the approved CV in the doc (local server only) |
+| `generate_cv_pdf` | "The Linear CV is approved, make the PDF" — builds the PDF from the approved CV in the doc and puts it in your Drive |
 | `generate_cover_letter` | "Write me a cover letter for Stripe" |
 | `add_application` | "Add this to my tracker as Saved" |
 | `update_application` | "Mark Stripe as Interview" |
@@ -239,9 +239,11 @@ If your CV is structured (a `.ts` or `.json` file, see `cv_file_path`), tailorin
 
 1. *"Tailor my CV for the Linear role"* — the assistant writes a tailored copy with exactly the same structure as your CV and saves it as JSON in the application doc, under **Tailored CV**, with a few notes on what it changed. Your base CV file is never changed.
 2. You review and edit the JSON in the doc. **The doc's version is the approved one**, so edit it there, not in your CV file.
-3. *"The Linear CV is approved, make the PDF"* — `generate_cv_pdf` reads the JSON from the doc, checks its structure, and runs your CV repo's PDF script with it. The PDF lands in `~/Downloads` (or `cv_pdf.output_dir`). Your name, email and website always come from your base CV.
+3. *"The Linear CV is approved, make the PDF"* — `generate_cv_pdf` reads the JSON from the doc, checks its structure, and runs your CV repo's PDF script with it. The PDF is uploaded to your Drive next to the application docs (same name → updated, not duplicated), and on the local server it's also saved to `~/Downloads` (or `cv_pdf.output_dir`). Your name, email and website always come from your base CV.
 
-The PDF step runs your own script, so it only works on the local server, on the computer that has your CV repo. It expects a repo with `scripts/generate-cv-pdf.tsx` that accepts `--json <file> --out <file>`. The repo is found from `cv_file_path` when that points to `<repo>/src/cv/cv.ts`, or set `cv_pdf.repo_path`. For the hosted server, re-run `npm run pack-config` so it includes your structured CV (`cv_json`) and can tailor it too.
+The PDF is made by your own script (`scripts/generate-cv-pdf.tsx` accepting `--json <file> --out <file>`), so local and hosted servers produce the same PDF:
+- **Local:** it runs from your repo on disk, found from `cv_file_path` when that points to `<repo>/src/cv/cv.ts`, or set `cv_pdf.repo_path`.
+- **Hosted:** set `cv_pdf.github_repo` (e.g. `"you/your-site"`, must be public). The server downloads that repo at its latest commit and runs the script with its own copy of `@react-pdf/renderer`, `react` and `tsx`. Re-run `npm run pack-config` and update `JOB_HUNTER_CONFIG_JSON` so the host gets `cv_json` and `cv_pdf`.
 
 ---
 
@@ -724,6 +726,7 @@ job-hunter/
 │   ├── sheets.js         # Google Sheets + Docs read/write
 │   ├── cv.js             # CV loading (PDF, DOCX, MD, TXT, TS, JSON)
 │   ├── cvSchema.js       # Structured CV shape + validation for tailored CVs
+│   ├── cvRenderer.js     # Finds the CV repo (local or GitHub) and runs its PDF script
 │   ├── docFormatter.js   # Turns doc markup into Docs styling (runs after every write)
 │   ├── docSections.js    # Doc sections, markup rules, doc → markdown
 │   └── tools/
