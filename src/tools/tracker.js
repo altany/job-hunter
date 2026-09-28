@@ -218,9 +218,9 @@ export const trackerTools = [
     name: "get_application_doc",
     definition: {
       name: "get_application_doc",
-      annotations: { title: "Get application doc", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: { title: "Get application doc", readOnlyHint: true, openWorldHint: false },
       description:
-        "Get the Google Doc linked to an application and return its full contents as markdown (sections, bullets, tables, code blocks). Read it before adding to or changing a doc so you don't duplicate a section; to change one, edit what you read and pass it to replace_doc_section. If the user gives a doc link, pass it as doc_url to link and read it. If none is linked, use create_application_doc to make one, or ask the user for a doc URL.",
+        "Get the Google Doc linked to an application and return its full contents as markdown (sections, bullets, tables, code blocks). Read it before adding to or changing a doc so you don't duplicate a section; to change one, edit what you read and pass it to replace_doc_section. Read-only. If the user gives a doc link, pass it as doc_url to read that doc; to link it to the application, use update_application with doc_url. If none is linked, use create_application_doc to make one, or ask the user for a doc URL.",
       securitySchemes: [{ type: "noauth" }],
       _meta: noauth,
       inputSchema: {
@@ -228,26 +228,16 @@ export const trackerTools = [
         properties: {
           company_name: { type: "string" },
           role_title: { type: "string" },
-          doc_url: { type: "string", description: "Google Doc URL to link to this application and read (optional; the doc must be shared with the service account as Editor)." },
+          doc_url: { type: "string", description: "Google Doc URL to read instead of the linked one (optional; the doc must be shared with the service account as Editor). This doesn't link it — use update_application for that." },
         },
         required: ["company_name", "role_title"],
       },
     },
     handler: async (args, { sheets }) => {
-      let docUrl;
-      if (args.doc_url) {
-        docUrl = args.doc_url;
-        try {
-          await sheets.updateApplication({
-            company_name: args.company_name,
-            role_title: args.role_title,
-            doc_url: docUrl,
-          });
-        } catch (e) { /* linking is best-effort; still try to read below */ }
-      } else {
-        try { docUrl = await sheets.getDocUrl(args.company_name, args.role_title); }
-        catch (e) { throw new Error(`getDocUrl failed: ${e.message}`); }
-      }
+      let linkedUrl = null;
+      try { linkedUrl = await sheets.getDocUrl(args.company_name, args.role_title); }
+      catch (e) { if (!args.doc_url) throw new Error(`getDocUrl failed: ${e.message}`); }
+      const docUrl = args.doc_url || linkedUrl;
 
       if (!docUrl) {
         return {
@@ -262,9 +252,11 @@ export const trackerTools = [
       try { docContent = await sheets.readDoc(docUrl); }
       catch (e) { docContent = `(couldn't read the doc — check it's shared with the service account as Editor: ${e.message})`; }
 
-      const header = args.doc_url
-        ? `📄 Linked and opened the interview doc for ${args.company_name}:\n${docUrl}`
-        : `📄 Interview doc for ${args.company_name}:\n${docUrl}`;
+      const sameDoc = (a, b) => a && b && a.match(/\/d\/([\w-]+)/)?.[1] === b.match(/\/d\/([\w-]+)/)?.[1];
+      const note = args.doc_url && !sameDoc(args.doc_url, linkedUrl)
+        ? `\n(This doc isn't the one linked to the application${linkedUrl ? "" : " — none is linked yet"}. To link it, use update_application with doc_url.)`
+        : "";
+      const header = `📄 Interview doc for ${args.company_name}:\n${docUrl}${note}`;
 
       return { content: [{ type: "text", text: `${header}\n\n---\n${docContent}` }] };
     },
