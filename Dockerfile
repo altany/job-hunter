@@ -1,5 +1,5 @@
 # Minimal container for the remote (HTTP) transport — used by Cloud Run.
-FROM node:20-slim
+FROM node:24-slim
 
 WORKDIR /app
 

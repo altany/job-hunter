@@ -6,7 +6,7 @@
   "license": "MIT",
   "main": "src/index.js",
   "engines": {
-    "node": ">=18"
+    "node": ">=24.22.1 <25"
   },
   "scripts": {
     "start": "node src/index.js",
