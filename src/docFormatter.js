@@ -148,10 +148,27 @@ export function createFormatter(rawDocs, log = () => {}) {
    *   *text*      → italic  (single asterisk, not double)
    *   `text`      → code
    *   ~~text~~    → strikethrough
+   *
+   * A marker only counts when it sits at a word edge: the text inside can't
+   * start or end with a space, and a single _ or * can't touch a letter, digit
+   * or another marker on the outside. So snake_case_names, __init__, URLs with
+   * underscores and "5 * 3 * 2" stay as they are.
    */
+  // Token regex — order matters: longer patterns first
+  const INLINE_TOKEN = new RegExp(
+    [
+      String.raw`\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*`,
+      String.raw`\*\*(?=\S)(.+?)(?<=\S)\*\*`,
+      String.raw`(?<![\p{L}\p{N}_])_(?![\s_])(.+?)(?<![\s_])_(?![\p{L}\p{N}_])`,
+      String.raw`(?<![\p{L}\p{N}*])\*(?![\s*])(.+?)(?<![\s*])\*(?![\p{L}\p{N}*])`,
+      String.raw`\x60(.+?)\x60`,
+      String.raw`~~(?=\S)(.+?)(?<=\S)~~`,
+    ].map((p) => `(?:${p})`).join("|"),
+    "gu"
+  );
+
   function parseInlineMarkdown(text) {
-    // Token regex — order matters: longer patterns first
-    const TOKEN = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|_(.+?)_|\*(.+?)\*|`(.+?)`|~~(.+?)~~)/g;
+    const TOKEN = new RegExp(INLINE_TOKEN.source, INLINE_TOKEN.flags);
 
     const segments = [];
     let last = 0;
@@ -164,18 +181,16 @@ export function createFormatter(rawDocs, log = () => {}) {
       }
 
       const full = match[0];
-      if (full.startsWith("***")) {
-        segments.push({ text: match[2], bold: true, italic: true, code: false, strikethrough: false });
-      } else if (full.startsWith("**")) {
-        segments.push({ text: match[3], bold: true, italic: false, code: false, strikethrough: false });
-      } else if (full.startsWith("_")) {
-        segments.push({ text: match[4], bold: false, italic: true, code: false, strikethrough: false });
-      } else if (full.startsWith("*")) {
-        segments.push({ text: match[5], bold: false, italic: true, code: false, strikethrough: false });
-      } else if (full.startsWith("`")) {
-        segments.push({ text: match[6], bold: false, italic: false, code: true, strikethrough: false });
-      } else if (full.startsWith("~~")) {
-        segments.push({ text: match[7], bold: false, italic: false, code: false, strikethrough: true });
+      if (match[1] !== undefined) {
+        segments.push({ text: match[1], bold: true, italic: true, code: false, strikethrough: false });
+      } else if (match[2] !== undefined) {
+        segments.push({ text: match[2], bold: true, italic: false, code: false, strikethrough: false });
+      } else if (match[3] !== undefined || match[4] !== undefined) {
+        segments.push({ text: match[3] ?? match[4], bold: false, italic: true, code: false, strikethrough: false });
+      } else if (match[5] !== undefined) {
+        segments.push({ text: match[5], bold: false, italic: false, code: true, strikethrough: false });
+      } else if (match[6] !== undefined) {
+        segments.push({ text: match[6], bold: false, italic: false, code: false, strikethrough: true });
       }
 
       last = match.index + full.length;
@@ -190,7 +205,7 @@ export function createFormatter(rawDocs, log = () => {}) {
   }
 
   function hasMarkdown(text) {
-    return /(\*\*\*|\*\*|(?<!\*)\*(?!\*)|_[^_]+_|`[^`]+`|~~)/.test(text);
+    return new RegExp(INLINE_TOKEN.source, "u").test(text);
   }
 
   /**
